@@ -205,5 +205,16 @@ check(!gEx.results.some(r=>/pagina|metodo/.test(r.exam_name_normalized)), 'NÃO 
 // não pode ter quebrado a amostra numérica canônica (segue 8)
 check(P.parseLabText(amostraSecao5).results.length===8, 'amostra canônica segue com 8 resultados');
 
+console.log('== correções de ingestão (regressão) ==');
+// referência na MESMA linha do exame (não pode descartar o exame por causa do "VR")
+const inl = P.parseLabText('HEMOGRAMA\nHemoglobina  9,8 g/dL   VR 12,0-16,0\nPlaquetas 200.000 /mm3');
+const hbInl = get(inl.results,'hemoglobina');
+check(hbInl && hbInl.value_numeric===9.8, 'Hb com VR inline capturada (veio '+(hbInl?hbInl.value_numeric:'nada')+')');
+check(hbInl && hbInl.reference_min===12 && hbInl.reference_max===16, 'VR inline 12-16 (veio '+(hbInl?hbInl.reference_min+'-'+hbInl.reference_max:'nada')+')');
+// linha de coleta/data NÃO vira exame
+const dl = P.parseLabText('Creatinina: 1,2 mg/dL\nColeta: 20/08/2026 06:00\nLiberado em: 21/08/2026');
+check(!dl.results.some(r=>/coleta|liber/.test(r.exam_name_normalized)), 'linha de data não vira exame (veio '+dl.results.map(r=>r.exam_name_normalized).join(',')+')');
+check(dl.results.length===1, 'só a creatinina entrou (veio '+dl.results.length+')');
+
 console.log(`\n== RESULTADO: ${passes} ok, ${fails} falhas ==`);
 process.exit(fails>0 ? 1 : 0);

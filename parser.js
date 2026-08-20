@@ -93,7 +93,7 @@
 
   /* ---------- detecção de linhas ---------- */
   function isReferenceLine(ln){ return /refer[eê]nc|valor(es)? de ref|\bvr\b|v\.r\b|intervalo de ref/.test(ln); }
-  function isNoiseLine(ln){ return /m[eé]todo|material|respons[aá]vel|\bcrm\b|assinatura|laborat[oó]rio|hospital|atendimento|libera[cç][aã]o|p[aá]gina|rodap[eé]|observa[cç]|coletado|data\b|hora\b/.test(ln); }
+  function isNoiseLine(ln){ return /m[eé]todo|material|respons[aá]vel|\bcrm\b|assinatura|laborat[oó]rio|hospital|atendimento|libera[cç][aã]o|p[aá]gina|rodap[eé]|observa[cç]|coleta|data\b|hora\b/.test(ln); }
 
   // Acha a âncora de exame na linha; retorna {key, isWord, matchText} ou null.
   // Regra anti-erro: sigla curta (Na, K, Cr, Mg...) só é exame se aparecer ANTES
@@ -169,6 +169,7 @@
     if(isNoiseLine(ln) || isReferenceLine(ln)) return null;
     var m = l.match(/^\s*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9()\/\-\s]{1,40}?)(?:\s*[:._–-]+\s*|\s{2,}|\t+)([<>]?\s*=?\s*-?\d[\d.,]*.*)$/);
     if(!m) return null;
+    if(/^\s*\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}/.test(m[2])) return null;   // valor é data → não é exame
     var label = m[1].replace(/[\s._:–-]+$/,'').trim();
     if(!/[a-zà-ÿ]{3,}/i.test(label)) return null;
     var val = extractValue(m[2]);
@@ -306,16 +307,17 @@
     for(var i=0;i<lines.length;i++){
       var l = lines[i], ln = norm(l);
 
-      if(isReferenceLine(ln)){
+      var anchor = findAnchor(l);
+      var val = extractValue(l);
+
+      // linha SÓ de referência (sem exame próprio) → aplica ao exame anterior
+      if(!anchor && isReferenceLine(ln)){
         if(current && current.result){
           var mr = l.match(/(-?\d[\d.]*(?:,\d+)?)\s*(?:[-a–]|at[eé])\s*(-?\d[\d.]*(?:,\d+)?)/);
           if(mr){ current.result.reference_min = parseNumBR(mr[1]); current.result.reference_max = parseNumBR(mr[2]); }
         }
         continue;
       }
-
-      var anchor = findAnchor(l);
-      var val = extractValue(l);
 
       if(anchor){
         var cat = catByKey(anchor.key);
@@ -329,7 +331,12 @@
           source_text: l
         };
         if(val){
-          applyVal(base, val); results.push(base); finalizeConfidence(base);
+          applyVal(base, val);
+          if(base.reference_min==null){   // referência na MESMA linha do exame ("... VR 12,0-16,0")
+            var mri = l.match(/(?:vr|v\.?\s?r\.?|refer[eê]ncia|valor(?:es)? de ref[^:]*)[:\s]*\(?\s*(-?\d[\d.]*(?:,\d+)?)\s*(?:[-a–]|at[eé])\s*(-?\d[\d.]*(?:,\d+)?)/i);
+            if(mri){ base.reference_min = parseNumBR(mri[1]); base.reference_max = parseNumBR(mri[2]); }
+          }
+          results.push(base); finalizeConfidence(base);
           current = {result: base, hasValue:true};
         } else {
           current = {result: base, hasValue:false};
