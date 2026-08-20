@@ -63,6 +63,9 @@
   .high{background:var(--highbg);color:var(--high);font-weight:700}
   .warncell{box-shadow:inset 0 0 0 2px var(--warn);background:var(--warnbg)}
   .nx{font-size:9px;color:var(--muted);vertical-align:super}
+  /* folha em branco (imprimir p/ preencher à mão) */
+  .folha td.bk,.folha th.bk{min-width:64px}
+  .folha table.blank td{height:22px}
 
   /* Eventos: culturas (e futuramente imagem) — seção que flui abaixo da grade */
   .evsec h2{margin:0 0 8px}
@@ -179,6 +182,7 @@
         </div>
         <div class="grow"></div>
         <button class="btn sm ghost noprint" id="btnEditPat">Editar</button>
+        <button class="btn sm ghost noprint" id="btnBlank" title="Imprimir uma folha em branco com a lista padrão de exames, pra preencher à mão">Folha em branco</button>
         <button class="btn sm noprint" id="btnPrint">🖨 Imprimir</button>
       </div>
       <div style="display:flex;gap:16px;margin-top:8px;border-top:1px solid var(--line2);padding-top:4px" class="noprint">
@@ -423,7 +427,7 @@ function renderFolhao(){
   renderEvents();
   const lg=document.getElementById('folhaLegend');
   const obsAll=encObs();
-  if(!obsAll.length){ document.getElementById('folhaBody').innerHTML='<p class="muted">Sem exames ainda. Vá em <b>Importar exames</b> e cole um bloco de resultados.</p>'; if(lg)lg.style.display='none'; return; }
+  if(!obsAll.length){ document.getElementById('folhaBody').innerHTML='<p class="muted">Sem exames ainda. Vá em <b>Importar exames</b> e cole um bloco de resultados — ou clique em <b>Folha em branco</b> pra imprimir um modelo e preencher à mão.</p>'; if(lg)lg.style.display='none'; return; }
   if(lg)lg.style.display='flex';
   let days=daysOf(obsAll);
   const per=document.getElementById('fltPeriodo').value;
@@ -747,6 +751,36 @@ document.getElementById('fileBackup').onchange=e=>{ const f=e.target.files[0]; i
 
 /* ===================== Imprimir ===================== */
 document.getElementById('btnPrint').onclick=()=>{ setTab('folhao'); renderPrintHeader(); setTimeout(()=>window.print(),60); };
+
+/* ===================== Folha em branco (imprimir p/ preencher à mão) ===================== */
+function renderBlankGrid(){
+  const NCOLS=7;
+  let h='<table class="blank"><thead><tr><th class="grpv"></th><th class="ex">Exame</th>';
+  for(let i=0;i<NCOLS;i++) h+='<th class="bk">&nbsp;</th>';
+  h+='</tr></thead><tbody>';
+  const groups=[];
+  P.GRUPOS.forEach(g=>{ const keys=P.CATALOG.filter(c=>c.grupo===g).map(c=>c.key); if(keys.length) groups.push({grupo:g,keys}); });
+  groups.forEach(grp=>{
+    grp.keys.forEach((key,gi)=>{
+      const c=P.catByKey(key);
+      h+='<tr>';
+      if(gi===0) h+=`<td class="grpv" rowspan="${grp.keys.length}"><span>${escapeHtml(GRP_LABEL[grp.grupo]||grp.grupo)}</span></td>`;
+      h+=`<td class="ex">${c.label} <span class="u">${c.unit||''}</span></td>`;
+      for(let i=0;i<NCOLS;i++) h+='<td class="bk">&nbsp;</td>';
+      h+='</tr>';
+    });
+  });
+  return h+'</tbody></table>';
+}
+function printBlank(){
+  setTab('folhao'); renderPrintHeader();
+  document.getElementById('folhaBody').innerHTML=renderBlankGrid();
+  const ev=document.getElementById('eventsBlock'); if(ev) ev.innerHTML='';
+  const lg=document.getElementById('folhaLegend'); if(lg) lg.style.display='none';
+  window.onafterprint=function(){ window.onafterprint=null; renderFolhao(); };
+  setTimeout(()=>window.print(),60);
+}
+document.getElementById('btnBlank').onclick=printBlank;
 
 /* ===================== Exemplo (3 pacientes fictícios) ===================== */
 document.getElementById('btnSeed').onclick=seed;
