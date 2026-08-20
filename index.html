@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Folhão · acompanhamento longitudinal</title>
+<title>Gama · acompanhamento longitudinal</title>
 <style>
   :root{
     --bg:#eef2f4; --panel:#ffffff; --line:#d6dee2; --line2:#e8eef0;
@@ -143,7 +143,7 @@
 </head>
 <body>
 <header>
-  <h1>Folhão <b>·</b> acompanhamento longitudinal</h1>
+  <h1>Gama <b>·</b> acompanhamento longitudinal</h1>
   <div class="grow"></div>
   <button class="btn sm ghost noprint" id="navPac">Pacientes</button>
   <button class="btn sm ghost noprint" id="btnExport" title="Baixar backup (JSON)">Backup ⭳</button>
@@ -182,7 +182,7 @@
         <button class="btn sm noprint" id="btnPrint">🖨 Imprimir</button>
       </div>
       <div style="display:flex;gap:16px;margin-top:8px;border-top:1px solid var(--line2);padding-top:4px" class="noprint">
-        <button class="btn tab active" data-tab="folhao">Folhão</button>
+        <button class="btn tab active" data-tab="folhao">Painel</button>
         <button class="btn tab" data-tab="import">Importar exames</button>
         <button class="btn tab" data-tab="alteracoes">Alterações</button>
       </div>
@@ -225,7 +225,7 @@ Resultado: 1,7 mg/dL
 Potássio: 5,2 mEq/L"></textarea>
         <div class="drop noprint" id="drop" style="margin-top:8px">…ou arraste um <b>PDF</b> do laudo aqui (extrai o texto e usa o mesmo processador)</div>
         <input type="file" id="filePdf" accept="application/pdf" hidden>
-        <div style="margin-top:10px"><button class="btn primary" id="btnProcess">Processar → folhão</button></div>
+        <div style="margin-top:10px"><button class="btn primary" id="btnProcess">Processar</button></div>
         <div id="importMsg" style="margin-top:10px"></div>
       </div>
     </div>
@@ -685,7 +685,7 @@ function commitResults(results,useISO){
   });
   save();
   document.getElementById('pasteArea').value='';
-  const msg=`${results.length} resultado(s) adicionado(s) em ${fmtDay(useISO)}. ${warn?('<b>'+warn+' incerto(s)</b> (amarelo no folhão) — confira.'):'Todos com boa confiança.'}`;
+  const msg=`${results.length} resultado(s) adicionado(s) em ${fmtDay(useISO)}. ${warn?('<b>'+warn+' incerto(s)</b> (amarelo no painel) — confira.'):'Todos com boa confiança.'}`;
   msgImport(warn?'warn':'ok',msg);
   setTab('folhao');
 }
@@ -738,7 +738,7 @@ function renderAlteracoes(){
 document.getElementById('btnExport').onclick=()=>{
   const blob=new Blob([JSON.stringify(DB,null,2)],{type:'application/json'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-  a.download='folhao_backup_'+new Date().toISOString().slice(0,10)+'.json'; a.click();
+  a.download='gama_backup_'+new Date().toISOString().slice(0,10)+'.json'; a.click();
 };
 document.getElementById('btnImportF').onclick=()=>document.getElementById('fileBackup').click();
 document.getElementById('fileBackup').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader();
