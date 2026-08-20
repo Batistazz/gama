@@ -59,6 +59,10 @@
     {key:'magnesio',label:'Magnésio',grupo:'Eletrólitos',unit:'mg/dL',dec:1,ref:[1.6,2.6],plaus:[0.5,6],aliases:['magnesio','mg']},
     {key:'fosforo',label:'Fósforo',grupo:'Eletrólitos',unit:'mg/dL',dec:1,ref:[2.5,4.5],plaus:[0.5,12],aliases:['fosforo','fosfato','p']},
     {key:'cloro',label:'Cloro',grupo:'Eletrólitos',unit:'mEq/L',dec:0,ref:[98,107],plaus:[70,140],aliases:['cloro','cloreto','cl']},
+    // Metabólico
+    {key:'glicose',label:'Glicose',grupo:'Metabólico',unit:'mg/dL',dec:0,ref:[70,99],plaus:[10,1500],aliases:['glicemia','glicose','glucose']},
+    {key:'acido_urico',label:'Ácido úrico',grupo:'Metabólico',unit:'mg/dL',dec:1,ref:[3.5,7.2],plaus:[0.5,25],aliases:['acido urico','ac urico','urato']},
+    {key:'ldh',label:'DHL (LDH)',grupo:'Metabólico',unit:'U/L',dec:0,ref:[120,246],plaus:[50,10000],aliases:['lactato desidrogenase','desidrogenase latica','ldh','dhl']},
     // Inflamatórios
     {key:'pcr',label:'PCR',grupo:'Inflamatórios',unit:'mg/L',dec:1,ref:[0,5],plaus:[0,600],aliases:['proteina c reativa','pcr']},
     {key:'vhs',label:'VHS',grupo:'Inflamatórios',unit:'mm/h',dec:0,ref:[0,20],plaus:[0,150],aliases:['vhs','hemossedimentacao','esr']},
@@ -90,8 +94,12 @@
     {key:'anion_gap',label:'Ânion gap',grupo:'Gasometria',unit:'mmol/L',dec:1,ref:[8,16],plaus:[0,50],aliases:['anion gap','anion-gap','anion -gap']},
   ];
 
-  var FIXED_PANEL = ['hemoglobina','hematocrito','leucocitos','bastoes','plaquetas','ureia','creatinina','sodio','potassio','calcio','magnesio','fosforo','pcr'];
-  var GRUPOS = ['Hemograma','Função renal','Eletrólitos','Inflamatórios','Hepático','Gasometria','Coagulação','Outros'];
+  var FIXED_PANEL = ['hemoglobina','hematocrito','leucocitos','bastoes','plaquetas','ureia','creatinina','sodio','potassio','cloro','calcio','magnesio','fosforo','glicose','pcr'];
+  // exames SECUNDÁRIOS: existem no catálogo (parseiam certo), mas NÃO poluem o "painel" — só em "Todos os exames"
+  var SECONDARY = ['hemacias','hcm','chcm','monocitos','eosinofilos','basofilos','linfocitos_reativos','metamielocitos','mielocitos','promielocitos','blastos','celulas_atipicas','vpm'];
+  // painel prevalente de clínica médica (usado na FOLHA EM BRANCO) — hemograma enxuto (9)
+  var BLANK_PANEL = ['hemoglobina','hematocrito','vcm','rdw','leucocitos','neutrofilos','bastoes','linfocitos','plaquetas','ureia','creatinina','sodio','potassio','cloro','calcio','magnesio','fosforo','glicose','acido_urico','ldh','pcr','vhs','ast','alt','fosfatase_alcalina','ggt','bilirrubina_total','albumina','tp','inr','ttpa'];
+  var GRUPOS = ['Hemograma','Função renal','Eletrólitos','Metabólico','Inflamatórios','Hepático','Gasometria','Coagulação','Outros'];
 
   // índice de apelidos: {alias, key, isWord}
   var ALIAS_INDEX = [];
@@ -435,6 +443,8 @@
     norm: norm,
     CATALOG: CATALOG,
     FIXED_PANEL: FIXED_PANEL,
+    SECONDARY: SECONDARY,
+    BLANK_PANEL: BLANK_PANEL,
     GRUPOS: GRUPOS,
     catByKey: catByKey
   };

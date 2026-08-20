@@ -446,11 +446,11 @@ function renderFolhao(){
   const rowMode=document.getElementById('fltRows').value;
   const presentes=new Set(obsAll.map(o=>o.exam_name_normalized));
 
-  const rows=[];
+  const rows=[]; const secondary=new Set(P.SECONDARY||[]);
   P.GRUPOS.forEach(g=>{
     P.CATALOG.filter(c=>c.grupo===g).forEach(c=>{
       const isFixed=P.FIXED_PANEL.includes(c.key);
-      const showRow = rowMode==='todos' ? true : (isFixed || presentes.has(c.key));
+      const showRow = rowMode==='todos' ? true : (isFixed || (presentes.has(c.key) && !secondary.has(c.key)));
       if(showRow) rows.push(c.key);
     });
   });
@@ -768,7 +768,7 @@ function renderBlankGrid(){
   let h='<table class="blank"><thead><tr><th class="grpv"></th><th class="ex">Exame</th>';
   for(let i=0;i<NCOLS;i++) h+='<th class="bk">&nbsp;</th>';
   h+='</tr></thead><tbody>';
-  const groups=[]; const fixed=new Set(P.FIXED_PANEL);   // só os exames mais prevalentes (painel fixo)
+  const groups=[]; const fixed=new Set(P.BLANK_PANEL||P.FIXED_PANEL);   // painel prevalente de clínica médica
   P.GRUPOS.forEach(g=>{ const keys=P.CATALOG.filter(c=>c.grupo===g && fixed.has(c.key)).map(c=>c.key); if(keys.length) groups.push({grupo:g,keys}); });
   groups.forEach(grp=>{
     grp.keys.forEach((key,gi)=>{
