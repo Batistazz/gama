@@ -243,6 +243,16 @@ check(P.detectKind('HEMOGRAMA COMPLETO\nIMPRESSÃO: 18/08/2026 07:05\nHEMOGLOBIN
 const idl = P.parseLabText('RAIMUNDO JOSE DE OLIVEIRA 30-438608\nCreatinina: 1,1 mg/dL');
 check(!idl.results.some(r=>/raimundo|oliveira|\d{4,}/.test(r.exam_name_original)), 'nome+atendimento não vira exame (veio '+idl.results.map(r=>r.exam_name_original).join('|')+')');
 check(idl.results.length===1, 'só a creatinina entrou (veio '+idl.results.length+')');
+// nome com dígito (PCO2/HCO3) → pega o valor, não o dígito do nome
+const gaso = P.parseLabText('PCO2..........: 38,5 mmHg 35 a 45 mmHg\nHCO3..........: 29,8 mmol/L');
+check(get(gaso.results,'pco2') && get(gaso.results,'pco2').value_numeric===38.5, 'PCO2 = 38,5 (não o 2 do nome) (veio '+(get(gaso.results,'pco2')||{}).value_numeric+')');
+check(get(gaso.results,'hco3') && get(gaso.results,'hco3').value_numeric===29.8, 'HCO3 = 29,8 (veio '+(get(gaso.results,'hco3')||{}).value_numeric+')');
+// LINFÓCITOS REATIVOS / NEUTRÓFILOS BASTONETES não colidem com os principais
+const difc = P.parseLabText('LINFÓCITOS.............: 12,0 % 1883 /mm³\nLINFÓCITOS REATIVOS....: 0,0 % 0 /mm³\nNEUTRÓFILOS BASTONETES.: 2,0 % 300 /mm³\nNEUTRÓFILOS SEGMENTADOS: 79,0 % 12395 /mm³');
+check(get(difc.results,'linfocitos').value_numeric===1883, 'linfócitos = 1883 (reativos não zeram)');
+check(get(difc.results,'linfocitos_reativos').value_numeric===0, 'linfócitos reativos separados');
+check(get(difc.results,'bastoes').value_numeric===300, 'bastonetes → bastões 300 (não neutrófilos)');
+check(get(difc.results,'neutrofilos').value_numeric===12395, 'segmentados → neutrófilos 12395');
 
 console.log(`\n== RESULTADO: ${passes} ok, ${fails} falhas ==`);
 process.exit(fails>0 ? 1 : 0);

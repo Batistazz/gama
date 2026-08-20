@@ -35,13 +35,20 @@
     {key:'chcm',label:'CHCM',grupo:'Hemograma',unit:'g/dL',dec:1,ref:[32,36],plaus:[25,40],aliases:['chcm','mchc']},
     {key:'rdw',label:'RDW',grupo:'Hemograma',unit:'%',dec:1,ref:[11.5,14.5],plaus:[8,30],aliases:['rdw']},
     {key:'leucocitos',label:'Leucócitos',grupo:'Hemograma',unit:'/mm³',dec:0,ref:[4000,11000],plaus:[100,200000],aliases:['leucocitos','leucograma','leuco','wbc','globulos brancos']},
-    {key:'neutrofilos',label:'Neutrófilos',grupo:'Hemograma',unit:'/mm³',dec:0,ref:[1800,7000],plaus:[0,180000],aliases:['neutrofilos','segmentados','neutro']},
-    {key:'bastoes',label:'Bastões',grupo:'Hemograma',unit:'%',dec:0,ref:[0,5],plaus:[0,60],aliases:['bastoes','bastonetes','bast']},
+    {key:'neutrofilos',label:'Neutrófilos',grupo:'Hemograma',unit:'/mm³',dec:0,ref:[1800,7000],plaus:[0,180000],aliases:['neutrofilos segmentados','segmentados','neutrofilos','neutro']},
+    {key:'bastoes',label:'Bastões',grupo:'Hemograma',unit:'/mm³',dec:0,ref:[0,700],plaus:[0,60000],aliases:['neutrofilos bastonetes','bastonetes','bastoes','bast']},
     {key:'linfocitos',label:'Linfócitos',grupo:'Hemograma',unit:'/mm³',dec:0,ref:[1000,4000],plaus:[0,90000],aliases:['linfocitos','linfo','lymph']},
+    {key:'linfocitos_reativos',label:'Linfócitos reativos',grupo:'Hemograma',unit:'/mm³',dec:0,ref:[0,100],plaus:[0,20000],aliases:['linfocitos reativos','linfocitos atipicos']},
     {key:'monocitos',label:'Monócitos',grupo:'Hemograma',unit:'/mm³',dec:0,ref:[200,1000],plaus:[0,40000],aliases:['monocitos','mono']},
     {key:'eosinofilos',label:'Eosinófilos',grupo:'Hemograma',unit:'/mm³',dec:0,ref:[0,500],plaus:[0,40000],aliases:['eosinofilos','eosino','eos']},
     {key:'basofilos',label:'Basófilos',grupo:'Hemograma',unit:'/mm³',dec:0,ref:[0,200],plaus:[0,10000],aliases:['basofilos','baso']},
+    {key:'metamielocitos',label:'Metamielócitos',grupo:'Hemograma',unit:'/mm³',dec:0,ref:[0,0],plaus:[0,20000],aliases:['metamielocitos']},
+    {key:'mielocitos',label:'Mielócitos',grupo:'Hemograma',unit:'/mm³',dec:0,ref:[0,0],plaus:[0,20000],aliases:['mielocitos']},
+    {key:'promielocitos',label:'Promielócitos',grupo:'Hemograma',unit:'/mm³',dec:0,ref:[0,0],plaus:[0,20000],aliases:['promielocitos']},
+    {key:'blastos',label:'Blastos',grupo:'Hemograma',unit:'/mm³',dec:0,ref:[0,0],plaus:[0,200000],aliases:['blastos','blasto']},
+    {key:'celulas_atipicas',label:'Células atípicas',grupo:'Hemograma',unit:'/mm³',dec:0,ref:[0,0],plaus:[0,200000],aliases:['celulas atipicas','celula atipica']},
     {key:'plaquetas',label:'Plaquetas',grupo:'Hemograma',unit:'/mm³',dec:0,ref:[150000,450000],plaus:[1000,2000000],aliases:['plaquetas','plaqueta','plt','plaq']},
+    {key:'vpm',label:'VPM',grupo:'Hemograma',unit:'fL',dec:1,ref:[9,13],plaus:[4,25],aliases:['vpm','volume plaquetario medio','mpv']},
     // Função renal
     {key:'creatinina',label:'Creatinina',grupo:'Função renal',unit:'mg/dL',dec:2,ref:[0.6,1.3],plaus:[0.1,30],aliases:['creatinina','creat','crea','cr']},
     {key:'ureia',label:'Ureia',grupo:'Função renal',unit:'mg/dL',dec:0,ref:[15,45],plaus:[2,400],aliases:['ureia','ur']},
@@ -62,8 +69,8 @@
     {key:'fosfatase_alcalina',label:'Fosfatase alcalina',grupo:'Hepático',unit:'U/L',dec:0,ref:[40,129],plaus:[10,2000],aliases:['fosfatase alcalina','fal','alp']},
     {key:'ggt',label:'GGT',grupo:'Hepático',unit:'U/L',dec:0,ref:[8,61],plaus:[2,3000],aliases:['gama gt','gama-gt','glutamil','ggt']},
     {key:'bilirrubina_total',label:'Bilirrubina total',grupo:'Hepático',unit:'mg/dL',dec:2,ref:[0.2,1.2],plaus:[0,60],aliases:['bilirrubina total','bilirrubinas totais','bt']},
-    {key:'bilirrubina_direta',label:'Bilirrubina direta',grupo:'Hepático',unit:'mg/dL',dec:2,ref:[0,0.3],plaus:[0,40],aliases:['bilirrubina direta','bd']},
-    {key:'bilirrubina_indireta',label:'Bilirrubina indireta',grupo:'Hepático',unit:'mg/dL',dec:2,ref:[0,0.9],plaus:[0,40],aliases:['bilirrubina indireta','bi']},
+    {key:'bilirrubina_direta',label:'Bilirrubina direta',grupo:'Hepático',unit:'mg/dL',dec:2,ref:[0,0.3],plaus:[0,40],aliases:['bilirrubina direta','direta','bd']},
+    {key:'bilirrubina_indireta',label:'Bilirrubina indireta',grupo:'Hepático',unit:'mg/dL',dec:2,ref:[0,0.9],plaus:[0,40],aliases:['bilirrubina indireta','indireta','bi']},
     {key:'albumina',label:'Albumina',grupo:'Hepático',unit:'g/dL',dec:1,ref:[3.5,5.2],plaus:[0.5,7],aliases:['albumina','alb']},
     {key:'proteinas_totais',label:'Proteínas totais',grupo:'Hepático',unit:'g/dL',dec:1,ref:[6,8],plaus:[2,12],aliases:['proteinas totais','ptn totais']},
     // Coagulação
@@ -71,10 +78,20 @@
     {key:'tp',label:'TP (protrombina)',grupo:'Coagulação',unit:'s',dec:1,ref:[10,13],plaus:[5,120],aliases:['tempo de protrombina','protrombina','tap','tp']},
     {key:'ttpa',label:'TTPa',grupo:'Coagulação',unit:'s',dec:1,ref:[25,37],plaus:[15,200],aliases:['tempo de tromboplastina','ttpa','aptt','ptt']},
     {key:'fibrinogenio',label:'Fibrinogênio',grupo:'Coagulação',unit:'mg/dL',dec:0,ref:[200,400],plaus:[30,1200],aliases:['fibrinogenio']},
+    // Gasometria
+    {key:'ph',label:'pH',grupo:'Gasometria',unit:'',dec:2,ref:[7.35,7.45],plaus:[6.5,8],aliases:['ph sanguineo','ph']},
+    {key:'pco2',label:'pCO₂',grupo:'Gasometria',unit:'mmHg',dec:1,ref:[35,45],plaus:[10,120],aliases:['pco2','paco2']},
+    {key:'po2',label:'pO₂',grupo:'Gasometria',unit:'mmHg',dec:1,ref:[80,100],plaus:[20,600],aliases:['po2','pao2']},
+    {key:'hco3',label:'HCO₃',grupo:'Gasometria',unit:'mmol/L',dec:1,ref:[22,26],plaus:[3,50],aliases:['hco3','bicarbonato']},
+    {key:'be',label:'Excesso de base',grupo:'Gasometria',unit:'mmol/L',dec:1,ref:[-3,3],plaus:[-30,30],aliases:['excesso de base','base excess','be ecf','be']},
+    {key:'sato2',label:'SatO₂',grupo:'Gasometria',unit:'%',dec:1,ref:[95,100],plaus:[30,100],aliases:['saturacao de o2','sato2','so2']},
+    {key:'lactato',label:'Lactato',grupo:'Gasometria',unit:'mmol/L',dec:1,ref:[0.5,2],plaus:[0,30],aliases:['lactato','acido latico']},
+    {key:'tco2',label:'CO₂ total',grupo:'Gasometria',unit:'mmol/L',dec:1,ref:[23,27],plaus:[3,50],aliases:['tco2','co2 total']},
+    {key:'anion_gap',label:'Ânion gap',grupo:'Gasometria',unit:'mmol/L',dec:1,ref:[8,16],plaus:[0,50],aliases:['anion gap','anion-gap','anion -gap']},
   ];
 
   var FIXED_PANEL = ['hemoglobina','hematocrito','leucocitos','bastoes','plaquetas','ureia','creatinina','sodio','potassio','calcio','magnesio','fosforo','pcr'];
-  var GRUPOS = ['Hemograma','Função renal','Eletrólitos','Inflamatórios','Hepático','Coagulação','Outros'];
+  var GRUPOS = ['Hemograma','Função renal','Eletrólitos','Inflamatórios','Hepático','Gasometria','Coagulação','Outros'];
 
   // índice de apelidos: {alias, key, isWord}
   var ALIAS_INDEX = [];
@@ -95,7 +112,7 @@
   function isReferenceLine(ln){ return /refer[eê]nc|valor(es)? de ref|\bvr\b|v\.r\b|intervalo de ref/.test(ln); }
   // linha que COMEÇA com rótulo de referência → é referência (não exame), mesmo que cite um exame depois
   function isReferenceHeader(ln){ return /^\s*(valor(es)? de refer|refer[eê]ncia\b|vr[:.\s]|v\.?\s?r\.?[:.\s]|intervalo de refer)/.test(ln); }
-  function isNoiseLine(ln){ return /m[eé]todo|material|respons[aá]vel|\bcr[bm]m\b|crbm|conselho|assinatura|laborat[oó]rio|hospital|paciente|solicitante|conv[eê]nio|atendimento|\bcpf\b|\bc\.i\b|idade|sexo|libera[cç][aã]o|p[aá]gina|rodap[eé]|observa[cç]|coleta|data\b|hor[aá]rio|hora\b|\bnegro\b|filtra[cç][aã]o glomerular|ckd-?epi/.test(ln); }
+  function isNoiseLine(ln){ return /m[eé]todo|material|respons[aá]vel|\bcr[bm]m\b|crbm|conselho|assinatura|laborat[oó]rio|hospital|paciente|solicitante|conv[eê]nio|atendimento|\bcpf\b|\bc\.i\b|idade|sexo|libera[cç][aã]o|p[aá]gina|rodap[eé]|observa[cç]|coleta|data\b|hor[aá]rio|hora\b|\bnegro\b|filtra[cç][aã]o glomerular|ckd-?epi|plasma\s+(examinado|controle)/.test(ln); }
 
   // Acha a âncora de exame na linha; retorna {key, isWord, matchText} ou null.
   // Regra anti-erro: sigla curta (Na, K, Cr, Mg...) só é exame se aparecer ANTES
@@ -133,6 +150,8 @@
     if(mref){ reference = [parseNumBR(mref[1]), parseNumBR(mref[2])]; }
     // parte "valor": remove parentéticos pra não pegar a referência como valor
     var valuePart = l.replace(/\([^)]*\)/g,' ').replace(/\[[^\]]*\]/g,' ');
+    var ci = valuePart.indexOf(':');
+    if(ci>=0 && /\d/.test(valuePart.slice(ci+1))) valuePart = valuePart.slice(ci+1);   // valor vem DEPOIS do ":" (não pega o dígito do nome, ex.: PCO2/HCO3/TCO2)
     var vpn = norm(valuePart);
 
     // censurado (<0,1 / >100)
