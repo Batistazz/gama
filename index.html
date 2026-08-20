@@ -63,6 +63,7 @@
   .high{background:var(--highbg);color:var(--high);font-weight:700}
   .warncell{box-shadow:inset 0 0 0 2px var(--warn);background:var(--warnbg)}
   .nx{font-size:9px;color:var(--muted);vertical-align:super}
+  .mk{font-weight:800;font-size:10px;margin-left:2px;vertical-align:super}   /* +/++ acima, −/−− abaixo */
   /* folha em branco (imprimir p/ preencher à mão) */
   .folha td.bk,.folha th.bk{min-width:64px}
   .folha table.blank td{height:22px}
@@ -206,10 +207,10 @@
       <div class="card">
         <div class="folha"><div id="folhaBody"></div></div>
         <div class="legend" id="folhaLegend" style="display:none">
-          <span class="noprint"><span class="sw low"></span>abaixo da referência</span>
-          <span class="noprint"><span class="sw high"></span>acima da referência</span>
+          <span class="noprint"><span class="sw high"></span>acima da referência (+/++)</span>
+          <span class="noprint"><span class="sw low"></span>abaixo da referência (−/−−)</span>
           <span class="noprint"><span class="sw warn"></span>incerto (confira)</span>
-          <span class="print-only">célula destacada = fora da referência · ▢ = incerto</span>
+          <span class="print-only">+/++ = acima · −/−− = abaixo (2 sinais = bem fora) · ▢ = incerto</span>
           <span class="muted">Δ vs. comparação escolhida · N× = coletas no dia (mostra a última)</span>
         </div>
       </div>
@@ -404,7 +405,10 @@ function abnormal(o){
   let lo=o.reference_min, hi=o.reference_max;
   if(lo==null||hi==null){ if(c&&c.ref){lo=c.ref[0];hi=c.ref[1];} }
   if(lo==null||hi==null)return null;
-  if(o.value_numeric<lo)return{dir:'low'}; if(o.value_numeric>hi)return{dir:'high'}; return{dir:null};
+  const v=o.value_numeric, margin=(hi-lo)||Math.abs(hi)||1;   // "bem fora" = além da faixa por mais que a largura dela
+  if(v<lo) return {dir:'low',  mark:(v<lo-margin?'−−':'−')};
+  if(v>hi) return {dir:'high', mark:(v>hi+margin?'++':'+')};
+  return {dir:null, mark:''};
 }
 function trend(series){
   const nums=series.filter(s=>s.v!=null).map(s=>s.v);
@@ -473,8 +477,9 @@ function renderFolhao(){
         if(!o){ h+=`<td class="cell empty" data-k="${key}" data-d="${d}">·</td>`; return; }
         const ab=abnormal(o); let cls='cell'; if(ab&&ab.dir==='low')cls+=' low'; if(ab&&ab.dir==='high')cls+=' high';
         if(o.confidence==='warn')cls+=' warncell';
+        const mk=(ab&&ab.mark)?`<span class="mk">${ab.mark}</span>`:'';
         const nx=list.length>1?`<span class="nx">${list.length}×</span>`:'';
-        h+=`<td class="${cls}" data-k="${key}" data-d="${d}" title="${o.confidence==='warn'?'incerto: '+(o.confidence_reason||'')+' — confira':''}">${obsDisplay(o)}${nx}</td>`;
+        h+=`<td class="${cls}" data-k="${key}" data-d="${d}" title="${o.confidence==='warn'?'incerto: '+(o.confidence_reason||'')+' — confira':''}">${obsDisplay(o)}${mk}${nx}</td>`;
       });
       const nums=series.filter(s=>s.v!=null);
       if(nums.length>=2){
