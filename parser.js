@@ -184,6 +184,8 @@
     if(!/[a-zà-ÿ]{3,}/i.test(label)) return null;
     var val = extractValue(m[2]);
     if(!val || (val.value_type!=='numeric' && val.value_type!=='less_than' && val.value_type!=='greater_than')) return null;
+    // inteiro grande SEM unidade = nº de atendimento/registro/CPF (ou nome + nº), não exame
+    if(val.value_type==='numeric' && !val.unit && Number.isInteger(val.value_numeric) && Math.abs(val.value_numeric)>=1000) return null;
     return { label: label, val: val };
   }
 

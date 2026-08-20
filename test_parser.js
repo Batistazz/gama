@@ -239,6 +239,10 @@ check(!noise.results.some(r=>/crbm|fulano|protrombina|atividade/i.test(r.exam_na
 check(noise.results.length===1, 'só a creatinina entrou (veio '+noise.results.length+')');
 // laudo de hemograma com "IMPRESSÃO: <data>" NÃO é imagem
 check(P.detectKind('HEMOGRAMA COMPLETO\nIMPRESSÃO: 18/08/2026 07:05\nHEMOGLOBINA: 13,0 g/dL')==='lab', 'IMPRESSÃO:(data) não roteia como imagem');
+// nome do paciente + nº de atendimento (inteiro grande sem unidade) não vira exame
+const idl = P.parseLabText('RAIMUNDO JOSE DE OLIVEIRA 30-438608\nCreatinina: 1,1 mg/dL');
+check(!idl.results.some(r=>/raimundo|oliveira|\d{4,}/.test(r.exam_name_original)), 'nome+atendimento não vira exame (veio '+idl.results.map(r=>r.exam_name_original).join('|')+')');
+check(idl.results.length===1, 'só a creatinina entrou (veio '+idl.results.length+')');
 
 console.log(`\n== RESULTADO: ${passes} ok, ${fails} falhas ==`);
 process.exit(fails>0 ? 1 : 0);
