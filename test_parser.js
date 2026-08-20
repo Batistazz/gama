@@ -253,6 +253,12 @@ check(get(difc.results,'linfocitos').value_numeric===1883, 'linfócitos = 1883 (
 check(get(difc.results,'linfocitos_reativos').value_numeric===0, 'linfócitos reativos separados');
 check(get(difc.results,'bastoes').value_numeric===300, 'bastonetes → bastões 300 (não neutrófilos)');
 check(get(difc.results,'neutrofilos').value_numeric===12395, 'segmentados → neutrófilos 12395');
+// laudo multi-data (uma colagem, várias datas de coleta do mesmo paciente)
+const md = P.parseLabText('COLETA...:19/08/2026\nHEMOGLOBINA............: 13,0 g/dL\nCREATININA......: 0,98 mg/dL\nCOLETA...:16/08/2026\nHEMOGLOBINA............: 11,0 g/dL\nCREATININA......: 1,50 mg/dL');
+const d19=md.results.filter(r=>(r.collection_dateISO||'').slice(0,10)==='2026-08-19');
+const d16=md.results.filter(r=>(r.collection_dateISO||'').slice(0,10)==='2026-08-16');
+check(d19.length===2 && d16.length===2, 'multi-data: 2 exames por data (veio 19:'+d19.length+' 16:'+d16.length+')');
+check(get(d19,'hemoglobina').value_numeric===13 && get(d16,'hemoglobina').value_numeric===11, 'Hb 13 em 19/08 e 11 em 16/08 (colunas distintas)');
 
 console.log(`\n== RESULTADO: ${passes} ok, ${fails} falhas ==`);
 process.exit(fails>0 ? 1 : 0);

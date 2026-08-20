@@ -682,19 +682,22 @@ function commitCulture(cult,useISO){
   setTab('folhao');
 }
 function commitResults(results,useISO){
-  let ok=0,warn=0;
+  let ok=0,warn=0; const datas=new Set();
   results.forEach(r=>{
+    const iso=r.collection_dateISO||useISO; datas.add(iso.slice(0,10));
     DB.observations.push({id:uid(),patient_id:curPat.id,encounter_id:curEnc.id,category:'laboratory',
       exam_name_original:r.exam_name_original,exam_name_normalized:r.exam_name_normalized,
       value_type:r.value_type,value_numeric:r.value_numeric,value_text:r.value_text,unit:r.unit||(P.catByKey(r.exam_name_normalized)||{}).unit,
       reference_min:r.reference_min,reference_max:r.reference_max,reference_text:r.reference_text,
-      collection_datetime:useISO,source_type:'import',source_text:r.source_text,confidence:r.confidence,confidence_reason:r.confidence_reason,
+      collection_datetime:iso,source_type:'import',source_text:r.source_text,confidence:r.confidence,confidence_reason:r.confidence_reason,
       created_at:new Date().toISOString()});
     if(r.confidence==='warn')warn++; else ok++;
   });
   save();
   document.getElementById('pasteArea').value='';
-  const msg=`${results.length} resultado(s) adicionado(s) em ${fmtDay(useISO)}. ${warn?('<b>'+warn+' incerto(s)</b> (amarelo no painel) — confira.'):'Todos com boa confiança.'}`;
+  const dl=[...datas].sort();
+  const quando = dl.length>1 ? (dl.length+' datas ('+dl.map(d=>d.slice(8,10)+'/'+d.slice(5,7)).join(', ')+')') : fmtDay(dl[0]||useISO);
+  const msg=`${results.length} resultado(s) adicionado(s) em ${quando}. ${warn?('<b>'+warn+' incerto(s)</b> (amarelo no painel) — confira.'):'Todos com boa confiança.'}`;
   msgImport(warn?'warn':'ok',msg);
   setTab('folhao');
 }

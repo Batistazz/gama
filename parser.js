@@ -219,6 +219,15 @@
     return isNaN(d.getTime()) ? null : d.toISOString();
   }
 
+  // Data de coleta de UMA linha (só quando a linha diz "coleta") — usada p/ fatiar laudo multi-data
+  function collectionDateOf(l){
+    var m = String(l||'').match(/coleta[^0-9]{0,15}(\d{2})\/(\d{2})\/(\d{2,4})/i);
+    if(!m) return null;
+    var y = m[3].length===2 ? '20'+m[3] : m[3];
+    var d = new Date(+y, +m[2]-1, +m[1], 8, 0);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }
+
   /* ---------- cabeçalho do paciente (colar do prontuário → preencher cadastro) ----------
      Determinístico, rótulo-a-rótulo. Só devolve o que reconhece; nunca chuta.
      Datas viram 'YYYY-MM-DD' (pronto p/ <input type=date>); sexo vira 'M'/'F'. */
@@ -322,6 +331,8 @@
     var lines = String(text||'').split(/\r?\n/).map(function(s){return s.replace(/\s+/g,' ').trim();}).filter(Boolean);
     var results = [];
     var current = null; // {result, hasValue}
+    var docDate = detectDate(text);   // data do documento (fallback)
+    var curDate = null;               // data de coleta da SEÇÃO atual (laudo multi-data)
 
     function finalizeConfidence(r){
       var c = catByKey(r.exam_name_normalized);
@@ -338,6 +349,9 @@
 
     for(var i=0;i<lines.length;i++){
       var l = lines[i], ln = norm(l);
+
+      // atualiza a data de coleta corrente (cada página do laudo tem a sua "COLETA: dd/mm/aaaa")
+      var _cd = collectionDateOf(l); if(_cd) curDate = _cd;
 
       // linha de REFERÊNCIA (começa com "Valor de referência"/"VR"…) → aplica ao exame anterior, nunca vira exame
       if(isReferenceHeader(ln)){
@@ -360,6 +374,7 @@
           value_type:null, value_numeric:null, value_text:null, unit:null,
           reference_min:null, reference_max:null, reference_text:null,
           matched_symbol_only: !anchor.isWord,
+          collection_dateISO: (curDate || docDate),
           source_text: l
         };
         if(val){
@@ -383,7 +398,7 @@
             exam_name_original: g.label, exam_name_normalized: gkey, category:'laboratory',
             value_type:null, value_numeric:null, value_text:null, unit:null,
             reference_min:null, reference_max:null, reference_text:null,
-            matched_symbol_only:false, is_generic:true, source_text: l
+            matched_symbol_only:false, is_generic:true, collection_dateISO: (curDate || docDate), source_text: l
           };
           applyVal(gbase, g.val); results.push(gbase); finalizeConfidence(gbase);
           current = {result: gbase, hasValue:true};
@@ -397,7 +412,7 @@
       }
     }
 
-    return { results: results, dateISO: detectDate(text) };
+    return { results: results, dateISO: docDate };
 
     function applyVal(r, val){
       r.value_type = val.value_type;
