@@ -98,7 +98,7 @@
   // exames SECUNDÁRIOS: existem no catálogo (parseiam certo), mas NÃO poluem o "painel" — só em "Todos os exames"
   var SECONDARY = ['hemacias','hcm','chcm','monocitos','eosinofilos','basofilos','linfocitos_reativos','metamielocitos','mielocitos','promielocitos','blastos','celulas_atipicas','vpm'];
   // painel prevalente de clínica médica (usado na FOLHA EM BRANCO) — hemograma enxuto (9)
-  var BLANK_PANEL = ['hemoglobina','hematocrito','vcm','rdw','leucocitos','neutrofilos','bastoes','linfocitos','plaquetas','ureia','creatinina','sodio','potassio','cloro','calcio','magnesio','fosforo','glicose','acido_urico','ldh','pcr','vhs','ast','alt','fosfatase_alcalina','ggt','bilirrubina_total','albumina','tp','inr','ttpa'];
+  var BLANK_PANEL = ['hemoglobina','hematocrito','vcm','rdw','leucocitos','neutrofilos','bastoes','linfocitos','plaquetas','ureia','creatinina','sodio','potassio','cloro','calcio','magnesio','fosforo','glicose','acido_urico','ldh','pcr','vhs','procalcitonina','ast','alt','fosfatase_alcalina','ggt','bilirrubina_total','bilirrubina_direta','bilirrubina_indireta','proteinas_totais','albumina','tp','inr','ttpa','fibrinogenio'];
   var GRUPOS = ['Hemograma','Função renal','Eletrólitos','Metabólico','Inflamatórios','Hepático','Gasometria','Coagulação','Outros'];
 
   // índice de apelidos: {alias, key, isWord}
