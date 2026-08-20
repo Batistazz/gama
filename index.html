@@ -67,6 +67,9 @@
   /* folha em branco (imprimir p/ preencher à mão) */
   .folha td.bk,.folha th.bk{min-width:64px}
   .folha table.blank td{height:22px}
+  .notes{margin-top:14px;break-inside:avoid}
+  .notes-h{font-weight:700;font-size:12px;margin-bottom:8px;color:var(--accent2)}
+  .nl{border-bottom:1px solid #999;height:24px}
   /* colunas em branco pra preencher à mão — só na impressão */
   .fillcol{display:none}
   /* tendência discreta no fim */
@@ -136,6 +139,7 @@
     /* P&B: significado nunca depende de cor — anormal = célula destacada (cinza+negrito). */
     .folha th,.folha td{border:1px solid #000;color:#000!important;padding:2px 5px}
     .fillcol{display:table-cell}   /* colunas em branco pra preencher à mão aparecem no papel */
+    .nl{border-bottom:1px solid #000} .notes-h{color:#000}
     .folha thead th{background:#f0f0f0!important}
     .low,.high{background:#ececec!important;font-weight:700}   /* um único cinza p/ "anormal" */
     .warncell{box-shadow:none!important;background:#fff!important;outline:2px solid #000;outline-offset:-2px}
@@ -764,8 +768,8 @@ function renderBlankGrid(){
   let h='<table class="blank"><thead><tr><th class="grpv"></th><th class="ex">Exame</th>';
   for(let i=0;i<NCOLS;i++) h+='<th class="bk">&nbsp;</th>';
   h+='</tr></thead><tbody>';
-  const groups=[];
-  P.GRUPOS.forEach(g=>{ const keys=P.CATALOG.filter(c=>c.grupo===g).map(c=>c.key); if(keys.length) groups.push({grupo:g,keys}); });
+  const groups=[]; const fixed=new Set(P.FIXED_PANEL);   // só os exames mais prevalentes (painel fixo)
+  P.GRUPOS.forEach(g=>{ const keys=P.CATALOG.filter(c=>c.grupo===g && fixed.has(c.key)).map(c=>c.key); if(keys.length) groups.push({grupo:g,keys}); });
   groups.forEach(grp=>{
     grp.keys.forEach((key,gi)=>{
       const c=P.catByKey(key);
@@ -778,9 +782,14 @@ function renderBlankGrid(){
   });
   return h+'</tbody></table>';
 }
+function renderBlankNotes(){
+  let h='<div class="notes"><div class="notes-h">Outros exames · imagem (RX · TC · USG) · culturas — anotar</div>';
+  for(let i=0;i<7;i++) h+='<div class="nl"></div>';
+  return h+'</div>';
+}
 function printBlank(){
   setTab('folhao'); renderPrintHeader();
-  document.getElementById('folhaBody').innerHTML=renderBlankGrid();
+  document.getElementById('folhaBody').innerHTML=renderBlankGrid()+renderBlankNotes();
   const ev=document.getElementById('eventsBlock'); if(ev) ev.innerHTML='';
   const lg=document.getElementById('folhaLegend'); if(lg) lg.style.display='none';
   window.onafterprint=function(){ window.onafterprint=null; renderFolhao(); };
