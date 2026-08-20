@@ -216,5 +216,29 @@ const dl = P.parseLabText('Creatinina: 1,2 mg/dL\nColeta: 20/08/2026 06:00\nLibe
 check(!dl.results.some(r=>/coleta|liber/.test(r.exam_name_normalized)), 'linha de data não vira exame (veio '+dl.results.map(r=>r.exam_name_normalized).join(',')+')');
 check(dl.results.length===1, 'só a creatinina entrou (veio '+dl.results.length+')');
 
+console.log('== laudo real: hemograma/bioquímica (regressão) ==');
+// diferencial: usa o ABSOLUTO (/mm³), não a %
+const dif = P.parseLabText('NEUTRÓFILOS SEGMENTADOS:   79,0   %   12395   /mm³   40,0   a   70,0   %   - 1.300   a   6.000   céls/mm³');
+const neu = get(dif.results,'neutrofilos');
+check(neu && neu.value_numeric===12395, 'diferencial usa absoluto 12395, não 79% (veio '+(neu?neu.value_numeric:'nada')+')');
+// nome de exame numa linha, valor em "RESULTADO", com DATA DA COLETA no meio (não pode virar 18)
+const sep = P.parseLabText('CREATININA\nDATA DA COLETA.: 18/08/2026\nMATERIAL.......: Sangue\nMÉTODO.........: Enzimático\nRESULTADO......: 0,98 mg/dL');
+const cr = get(sep.results,'creatinina');
+check(cr && cr.value_numeric===0.98, 'creatinina pega RESULTADO 0,98 e ignora a data (veio '+(cr?cr.value_numeric:'nada')+')');
+check(sep.results.length===1, 'só 1 exame (data não virou exame) (veio '+sep.results.length+')');
+// unidade /mm³ (superscrito) e não pega o "s" de "plaquetas"
+const plq = P.parseLabText('PLAQUETAS..............:   275.900   /mm³   140.000   a   450.000   /mm³');
+const pq = get(plq.results,'plaquetas');
+check(pq && pq.value_numeric===275900 && pq.unit==='/mm3', 'plaquetas 275.900 unidade /mm3 (veio '+(pq?pq.value_numeric+'/'+pq.unit:'nada')+')');
+// INR/RNI sem unidade não deve marcar "sem unidade"
+const rni = get(P.parseLabText('RNI: 1,00').results,'inr');
+check(rni && rni.confidence==='ok', 'INR 1,00 fica ok (não cobra unidade) (veio '+(rni?rni.confidence:'nada')+')');
+// CRBM e nome do paciente não viram exame; "Valor de Referência: ... Protrombina ... 70%" também não
+const noise = P.parseLabText('R.T Dra Katia - CRBM 20805\nPACIENTE................: FULANO DE TAL 30-438608\nValor de Referência: Atividade de Protrombina: Maior ou igual a 70 %\nCreatinina: 1,2 mg/dL');
+check(!noise.results.some(r=>/crbm|fulano|protrombina|atividade/i.test(r.exam_name_original)), 'CRBM/nome/ref-protrombina não viram exame (veio '+noise.results.map(r=>r.exam_name_original).join(' | ')+')');
+check(noise.results.length===1, 'só a creatinina entrou (veio '+noise.results.length+')');
+// laudo de hemograma com "IMPRESSÃO: <data>" NÃO é imagem
+check(P.detectKind('HEMOGRAMA COMPLETO\nIMPRESSÃO: 18/08/2026 07:05\nHEMOGLOBINA: 13,0 g/dL')==='lab', 'IMPRESSÃO:(data) não roteia como imagem');
+
 console.log(`\n== RESULTADO: ${passes} ok, ${fails} falhas ==`);
 process.exit(fails>0 ? 1 : 0);

@@ -93,7 +93,9 @@
 
   /* ---------- detecção de linhas ---------- */
   function isReferenceLine(ln){ return /refer[eê]nc|valor(es)? de ref|\bvr\b|v\.r\b|intervalo de ref/.test(ln); }
-  function isNoiseLine(ln){ return /m[eé]todo|material|respons[aá]vel|\bcrm\b|assinatura|laborat[oó]rio|hospital|atendimento|libera[cç][aã]o|p[aá]gina|rodap[eé]|observa[cç]|coleta|data\b|hora\b/.test(ln); }
+  // linha que COMEÇA com rótulo de referência → é referência (não exame), mesmo que cite um exame depois
+  function isReferenceHeader(ln){ return /^\s*(valor(es)? de refer|refer[eê]ncia\b|vr[:.\s]|v\.?\s?r\.?[:.\s]|intervalo de refer)/.test(ln); }
+  function isNoiseLine(ln){ return /m[eé]todo|material|respons[aá]vel|\bcr[bm]m\b|crbm|conselho|assinatura|laborat[oó]rio|hospital|paciente|solicitante|conv[eê]nio|atendimento|\bcpf\b|\bc\.i\b|idade|sexo|libera[cç][aã]o|p[aá]gina|rodap[eé]|observa[cç]|coleta|data\b|hor[aá]rio|hora\b|\bnegro\b|filtra[cç][aã]o glomerular|ckd-?epi/.test(ln); }
 
   // Acha a âncora de exame na linha; retorna {key, isWord, matchText} ou null.
   // Regra anti-erro: sigla curta (Na, K, Cr, Mg...) só é exame se aparecer ANTES
@@ -140,6 +142,11 @@
               value_numeric: parseNumBR(mc[2]), value_text: mc[1]+mc[2].replace(/\s/g,''),
               unit: findUnit(valuePart), reference: reference};
     }
+    // diferencial de leucócitos: "79,0 % 12395 /mm³" → usa o ABSOLUTO (/mm³), não a porcentagem
+    var mdiff = valuePart.match(/\d[\d.]*(?:,\d+)?\s*%\s+(\d[\d.]*(?:,\d+)?)\s*\/?\s*mm/i);
+    if(mdiff){
+      return {value_type:'numeric', value_numeric: parseNumBR(mdiff[1]), value_text: mdiff[1], unit:'/mm3', reference: reference};
+    }
     // numérico
     var mn = valuePart.match(/-?\d{1,3}(?:\.\d{3})+(?:,\d+)?|-?\d+,\d+|-?\d+\.\d+|-?\d+/);
     if(mn){
@@ -155,7 +162,9 @@
   }
 
   function findUnit(l){
-    var ln = norm(l).replace(/\s+/g,'');
+    var ln = norm(l).replace(/³/g,'3').replace(/²/g,'2').replace(/[µμ]/g,'u');
+    var d = ln.search(/\d/); if(d>0) ln = ln.slice(d);   // ignora o NOME do exame (antes do 1º número) → não pega o "s" de "plaquetas"
+    ln = ln.replace(/\s+/g,'');
     for(var i=0;i<UNITS.length;i++){ if(ln.indexOf(UNITS[i].replace(/\s+/g,''))>=0) return UNITS[i]; }
     return null;
   }
@@ -170,6 +179,7 @@
     var m = l.match(/^\s*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9()\/\-\s]{1,40}?)(?:\s*[:._–-]+\s*|\s{2,}|\t+)([<>]?\s*=?\s*-?\d[\d.,]*.*)$/);
     if(!m) return null;
     if(/^\s*\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}/.test(m[2])) return null;   // valor é data → não é exame
+    if(/^\s*[<>]?\s*=?\s*-?\d[\d.,]*\s*(?:a|at[eé]|[-–])\s+/i.test(m[2])) return null;   // valor é FAIXA (referência)
     var label = m[1].replace(/[\s._:–-]+$/,'').trim();
     if(!/[a-zà-ÿ]{3,}/i.test(label)) return null;
     var val = extractValue(m[2]);
@@ -252,7 +262,8 @@
   function detectKind(text){
     var t=norm(text);
     if(/urocultura|hemocultura|coprocultura|antibiograma|antimicrobiano|\bufc\b|unidades formadoras/.test(t)) return 'culture';
-    if(/tomografia|radiografia|ultrassonograf|ultra-?som|\busg\b|resson[âa]ncia magnetica|densitometria|mamografia|ecocardiograma|\bimpress[ãa]o\b|\bconclus[ãa]o\b/.test(t)) return 'imaging';
+    // imagem = precisa de uma MODALIDADE de fato (não confundir com "IMPRESSÃO:" de data de laudo)
+    if(/tomografia|radiograf|ultrassonograf|ultra-?som|\busg\b|ressonancia magnetica|resson[âa]ncia|densitometria|mamografia|ecocardiograma|\bdoppler\b|cintilografia|angiotomografia|colonoscopia|\bendoscopia\b|\braio-?\s?x\b/.test(t)) return 'imaging';
     return 'lab';
   }
   function parseCulture(text){
@@ -297,7 +308,7 @@
       if(!c){ conf='warn'; motivos.push('exame fora do catálogo — confira'); }
       if(r.matched_symbol_only){ conf='warn'; motivos.push('reconhecido só por sigla'); }
       if(r.value_type==='numeric'){
-        if(!r.unit){ conf='warn'; motivos.push('sem unidade'); }
+        if(c && c.unit && !r.unit){ conf='warn'; motivos.push('sem unidade'); }   // só cobra unidade de exame que tem unidade (INR não tem)
         if(c && (r.value_numeric < c.plaus[0] || r.value_numeric > c.plaus[1])){ conf='warn'; motivos.push('valor fora da faixa fisiológica'); }
       }
       if(r.reference_min!=null && r.reference_max!=null && r.reference_min > r.reference_max){ conf='warn'; motivos.push('referência invertida'); r.reference_min=r.reference_max=null; }
@@ -307,17 +318,17 @@
     for(var i=0;i<lines.length;i++){
       var l = lines[i], ln = norm(l);
 
-      var anchor = findAnchor(l);
-      var val = extractValue(l);
-
-      // linha SÓ de referência (sem exame próprio) → aplica ao exame anterior
-      if(!anchor && isReferenceLine(ln)){
+      // linha de REFERÊNCIA (começa com "Valor de referência"/"VR"…) → aplica ao exame anterior, nunca vira exame
+      if(isReferenceHeader(ln)){
         if(current && current.result){
           var mr = l.match(/(-?\d[\d.]*(?:,\d+)?)\s*(?:[-a–]|at[eé])\s*(-?\d[\d.]*(?:,\d+)?)/);
           if(mr){ current.result.reference_min = parseNumBR(mr[1]); current.result.reference_max = parseNumBR(mr[2]); }
         }
         continue;
       }
+
+      var anchor = findAnchor(l);
+      var val = extractValue(l);
 
       if(anchor){
         var cat = catByKey(anchor.key);
@@ -355,7 +366,8 @@
           };
           applyVal(gbase, g.val); results.push(gbase); finalizeConfidence(gbase);
           current = {result: gbase, hasValue:true};
-        } else if(current && !current.hasValue && val){
+        } else if(current && !current.hasValue && val && !isNoiseLine(ln)){
+          // valor do exame-cabeçalho anterior (ex.: "RESULTADO: 0,98") — mas NUNCA de uma linha de ruído (data/coleta)
           current.result.source_text += ' | ' + l;
           applyVal(current.result, val); results.push(current.result); finalizeConfidence(current.result);
           current.hasValue = true;
