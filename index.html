@@ -67,6 +67,11 @@
   /* folha em branco (imprimir p/ preencher à mão) */
   .folha td.bk,.folha th.bk{min-width:64px}
   .folha table.blank td{height:22px}
+  /* colunas em branco pra preencher à mão — só na impressão */
+  .fillcol{display:none}
+  /* tendência discreta no fim */
+  .folha th.tnd,.folha td.tnd{color:var(--muted);font-weight:600;font-size:12px}
+  .folha td.tnd.up{color:var(--high)} .folha td.tnd.down{color:var(--low)}
 
   /* Eventos: culturas (e futuramente imagem) — seção que flui abaixo da grade */
   .evsec h2{margin:0 0 8px}
@@ -130,6 +135,7 @@
     tr{break-inside:avoid}
     /* P&B: significado nunca depende de cor — anormal = célula destacada (cinza+negrito). */
     .folha th,.folha td{border:1px solid #000;color:#000!important;padding:2px 5px}
+    .fillcol{display:table-cell}   /* colunas em branco pra preencher à mão aparecem no papel */
     .folha thead th{background:#f0f0f0!important}
     .low,.high{background:#ececec!important;font-weight:700}   /* um único cinza p/ "anormal" */
     .warncell{box-shadow:none!important;background:#fff!important;outline:2px solid #000;outline-offset:-2px}
@@ -199,8 +205,6 @@
         <span class="small muted">Período:</span>
         <select id="fltPeriodo" class="sm"><option value="all">Desde admissão</option><option value="1">Últimas 24h</option><option value="2">Últimas 48h</option><option value="7">7 dias</option></select>
         <select id="fltRows" class="sm"><option value="painel">Painel + presentes</option><option value="todos">Todos os exames</option><option value="alterados">Só alterados</option></select>
-        <span class="small muted" style="margin-left:8px">Comparar com:</span>
-        <select id="fltComp" class="sm"><option value="anterior">Anterior</option><option value="admissao">Admissão</option></select>
         <div class="grow"></div>
         <span class="small muted">Clique numa célula pra ver origem / editar.</span>
       </div>
@@ -211,7 +215,6 @@
           <span class="noprint"><span class="sw low"></span>abaixo da referência (−/−−)</span>
           <span class="noprint"><span class="sw warn"></span>incerto (confira)</span>
           <span class="print-only">+/++ = acima · −/−− = abaixo (2 sinais = bem fora) · ▢ = incerto</span>
-          <span class="muted">Δ vs. comparação escolhida · N× = coletas no dia (mostra a última)</span>
         </div>
       </div>
       <div id="eventsBlock"></div>
@@ -436,7 +439,6 @@ function renderFolhao(){
   let days=daysOf(obsAll);
   const per=document.getElementById('fltPeriodo').value;
   if(per!=='all'){ const base=new Date(days[days.length-1]+'T00:00:00'); base.setDate(base.getDate()-(+per-1)); const cut=base.toISOString().slice(0,10); days=days.filter(d=>d>=cut); }
-  const compMode=document.getElementById('fltComp').value;
   const rowMode=document.getElementById('fltRows').value;
   const presentes=new Set(obsAll.map(o=>o.exam_name_normalized));
 
@@ -462,9 +464,11 @@ function renderFolhao(){
   const groups=[];
   visible.forEach(key=>{ const g=examMeta(key).grupo; if(!groups.length||groups[groups.length-1].grupo!==g)groups.push({grupo:g,keys:[]}); groups[groups.length-1].keys.push(key); });
 
+  const NBLANK=4;   // colunas em branco (só impressão) p/ preencher à mão
   let h='<table><thead><tr><th class="grpv"></th><th class="ex">Exame</th>';
   days.forEach(d=>h+=`<th>${fmtDay(d)}</th>`);
-  h+='<th>Δ</th><th>Δ%</th><th>tend.</th></tr></thead><tbody>';
+  for(let i=0;i<NBLANK;i++) h+='<th class="fillcol bk">&nbsp;</th>';
+  h+='<th class="tnd">tend.</th></tr></thead><tbody>';
   groups.forEach(grp=>{
     grp.keys.forEach((key,gi)=>{
       const c=examMeta(key);
@@ -481,22 +485,16 @@ function renderFolhao(){
         const nx=list.length>1?`<span class="nx">${list.length}×</span>`:'';
         h+=`<td class="${cls}" data-k="${key}" data-d="${d}" title="${o.confidence==='warn'?'incerto: '+(o.confidence_reason||'')+' — confira':''}">${obsDisplay(o)}${mk}${nx}</td>`;
       });
+      for(let i=0;i<NBLANK;i++) h+='<td class="fillcol bk">&nbsp;</td>';
       const nums=series.filter(s=>s.v!=null);
-      if(nums.length>=2){
-        const last=nums[nums.length-1].v;
-        const refv=compMode==='admissao'?nums[0].v:nums[nums.length-2].v;
-        const d=last-refv, pc=refv!==0?d/refv*100:null;
-        const dcls=d>0?'up':d<0?'down':'';
-        h+=`<td class="delta ${dcls}">${d>0?'+':''}${fmtNum(d,c.dec)}</td><td class="delta ${dcls}">${pc==null?'—':(pc>0?'+':'')+fmtNum(pc,1)+'%'}</td>`;
-        const t=trend(series); h+=`<td class="trend ${t.cls==='up'?'delta up':t.cls==='down'?'delta down':''}">${t.sym}</td>`;
-      } else h+='<td>—</td><td>—</td><td>—</td>';
-      h+='</tr>';
+      const t=nums.length>=2?trend(series):{sym:'',cls:''};
+      h+=`<td class="tnd ${t.cls}">${t.sym||''}</td></tr>`;
     });
   });
   document.getElementById('folhaBody').innerHTML=h+'</tbody></table>';
   document.querySelectorAll('#folhaBody td.cell,#folhaBody td.empty').forEach(td=>td.onclick=()=>cellModal(td.dataset.k,td.dataset.d));
 }
-['fltPeriodo','fltRows','fltComp'].forEach(id=>document.getElementById(id).onchange=renderFolhao);
+['fltPeriodo','fltRows'].forEach(id=>document.getElementById(id).onchange=renderFolhao);
 
 /* ===================== Eventos (culturas; imagem na próxima etapa) ===================== */
 function encEvents(){ return (DB.events||[]).filter(e=>e.encounter_id===(curEnc&&curEnc.id)); }
