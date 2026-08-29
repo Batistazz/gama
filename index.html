@@ -200,7 +200,8 @@
       </div>
       <div style="display:flex;gap:16px;margin-top:8px;border-top:1px solid var(--line2);padding-top:4px" class="noprint">
         <button class="btn tab active" data-tab="folhao">Painel</button>
-        <button class="btn tab" data-tab="import">Importar exames</button>
+        <button class="btn tab" data-tab="exames">Exames por data</button>
+        <button class="btn tab" data-tab="import">Importar (texto)</button>
         <button class="btn tab" data-tab="alteracoes">Alterações</button>
       </div>
     </div>
@@ -226,18 +227,30 @@
       <div id="eventsBlock"></div>
     </div>
 
+    <!-- EXAMES POR DATA (arquivo, sem OCR) -->
+    <div class="tabview" id="tab-exames" style="display:none">
+      <div class="card noprint">
+        <h2>Exames por data</h2>
+        <p class="small muted">Arraste o <b>PDF</b> ou a <b>foto</b> do exame — fica guardado na <b>data da coleta</b>. Você não digita valor nenhum; só confirma a data (já vem sugerida). O arquivo fica <b>no seu navegador</b> (nada sai do aparelho).</p>
+        <div class="drop noprint" id="dropExame" style="margin-top:8px">Arraste o exame aqui, ou clique pra escolher (PDF ou foto)</div>
+        <input type="file" id="fileExame" accept="application/pdf,image/*" hidden>
+        <div id="examesMsg" style="margin-top:8px"></div>
+      </div>
+      <div id="examesBody" style="margin-top:10px"></div>
+    </div>
+
     <!-- IMPORT -->
     <div class="tabview" id="tab-import" style="display:none">
       <div class="card">
-        <h2>Colar resultados</h2>
-        <p class="small muted">Cole o bloco de resultados do sistema (pode vir com cabeçalho, método, referência, rodapé — eu ignoro o que não for exame). Uma data por colagem.</p>
+        <h2>Colar resultados (texto)</h2>
+        <p class="small muted">Só pra quando você tem o resultado como <b>texto</b> (copiado da tela do sistema): cole aqui e vira a grade comparativa — exato, sem OCR. <b>Se você só tem o PDF/foto do exame, use a aba “Exames por data”</b> (guarda o exame inteiro, sem digitar nada). Uma data por colagem.</p>
         <textarea id="pasteArea" placeholder="Ex.:
 Hemoglobina ......... 10,8 g/dL
 Valor de referência . 13,0 - 17,0
 CREATININA
 Resultado: 1,7 mg/dL
 Potássio: 5,2 mEq/L"></textarea>
-        <div class="drop noprint" id="drop" style="margin-top:8px">…ou arraste o <b>PDF</b> do laudo ou uma <b>foto</b> (JPG/PNG) aqui. Laudo escaneado/foto é lido por <b>OCR</b> no próprio navegador (offline, nada sai do aparelho) — <b>confira o texto</b>, o OCR pode errar.</div>
+        <div class="drop noprint" id="drop" style="margin-top:8px">…ou arraste o <b>PDF/foto</b> do exame aqui — ele é <b>guardado por data</b> (na aba “Exames por data”), sem ler número.</div>
         <input type="file" id="filePdf" accept="application/pdf,image/*" hidden>
         <div style="margin-top:10px"><button class="btn primary" id="btnProcess">Processar</button></div>
         <div id="importMsg" style="margin-top:10px"></div>
@@ -272,7 +285,7 @@ const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 
 /* ===================== Utilidades ===================== */
 const dayKey=iso=>iso.slice(0,10);
-const fmtDay=iso=>{const d=new Date(iso);return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0');};
+const fmtDay=iso=>{const s=String(iso||'');const m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);const d=m?new Date(+m[1],+m[2]-1,+m[3]):new Date(s);return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0');};
 const fmtTime=iso=>new Date(iso).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
 function fmtNum(n,dec){ if(n==null||isNaN(n))return'—'; return n.toLocaleString('pt-BR',{minimumFractionDigits:dec||0,maximumFractionDigits:dec||0}); }
 function obsDisplay(o){
@@ -378,6 +391,7 @@ function setTab(t){
   document.querySelectorAll('.tabview').forEach(v=>v.style.display='none');
   document.getElementById('tab-'+t).style.display='block';
   if(t==='folhao')renderFolhao();
+  if(t==='exames')renderExames();
   if(t==='alteracoes')renderAlteracoes();
   if(t==='import')document.getElementById('importMsg').innerHTML='';
 }
@@ -711,12 +725,18 @@ function msgImport(kind,html){ document.getElementById('importMsg').innerHTML=`<
 /* Import de laudo → texto → mesmo pipeline (Processar).
    PDF com camada de texto: extrai direto. PDF-imagem (scan) ou FOTO: cai no OCR offline
    (Tesseract.js em WebAssembly, roda no navegador — nenhum dado sai do aparelho). */
-const drop=document.getElementById('drop'), filePdf=document.getElementById('filePdf');
-drop.onclick=()=>filePdf.click();
-filePdf.onchange=e=>{ if(e.target.files[0])lerArquivo(e.target.files[0]); filePdf.value=''; };
-['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
-['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
-drop.addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f)lerArquivo(f); });
+// Arrastar arquivo (em qualquer das duas abas) → ARQUIVAR POR DATA (sem OCR, sem ler número).
+function wireDrop(dropId, inputId){
+  const drop=document.getElementById(dropId), inp=document.getElementById(inputId);
+  if(!drop||!inp) return;
+  drop.onclick=()=>inp.click();
+  inp.onchange=e=>{ if(e.target.files[0])arquivarExame(e.target.files[0]); inp.value=''; };
+  ['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
+  ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
+  drop.addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f)arquivarExame(f); });
+}
+wireDrop('drop','filePdf');
+wireDrop('dropExame','fileExame');
 
 function lerArquivo(file){
   if(file.type==='application/pdf' || /\.pdf$/i.test(file.name)) return lerPDF(file);
@@ -788,6 +808,82 @@ async function lerImagem(file){
     document.getElementById('pasteArea').value=txt;
     msgImport('warn','Foto lida por <b>OCR</b>. ⚠️ OCR erra número/unidade — <b>confira o texto acima</b> e clique <b>Processar</b>.');
   }catch(e){ msgImport('warn','Falha no OCR da foto: '+escapeHtml(e.message)); }
+}
+
+/* ===================== Exames por data (arquivo — SEM ler número) ===================== */
+/* Arquivos (PDF/foto) são pesados → vão pro IndexedDB; só metadados no localStorage. */
+function idbOpen(){ return new Promise((res,rej)=>{ const r=indexedDB.open('gama_files',1); r.onupgradeneeded=()=>r.result.createObjectStore('files'); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+async function idbSave(id,blob){ const db=await idbOpen(); return new Promise((res,rej)=>{ const t=db.transaction('files','readwrite'); t.objectStore('files').put(blob,id); t.oncomplete=()=>res(); t.onerror=()=>rej(t.error); }); }
+async function idbGet(id){ const db=await idbOpen(); return new Promise((res,rej)=>{ const t=db.transaction('files','readonly'); const q=t.objectStore('files').get(id); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); }); }
+async function idbDel(id){ const db=await idbOpen(); return new Promise((res)=>{ const t=db.transaction('files','readwrite'); t.objectStore('files').delete(id); t.oncomplete=()=>res(); t.onerror=()=>res(); }); }
+
+function examesMsg(kind,html){ const el=document.getElementById('examesMsg'); if(el)el.innerHTML=`<div class="banner ${kind}">${html}</div>`; }
+
+async function arquivarExame(file){
+  if(!curEnc){ examesMsg('warn','Selecione um paciente com internação antes.'); setTab('exames'); return; }
+  const isPdf = file.type==='application/pdf' || /\.pdf$/i.test(file.name);
+  const isImg = /^image\//.test(file.type) || /\.(png|jpe?g|webp|bmp|gif)$/i.test(file.name);
+  if(!isPdf && !isImg){ examesMsg('warn','Use PDF ou foto (JPG/PNG).'); setTab('exames'); return; }
+  // sugere a data: se o PDF tiver camada de texto, lê a data dele; senão, hoje. (NÃO lê valores.)
+  let dataISO = todayISOdate();
+  if(isPdf && window.pdfjsLib){
+    try{ const buf=await file.arrayBuffer(); const pdf=await pdfjsLib.getDocument({data:buf.slice(0)}).promise;
+      const tc=await (await pdf.getPage(1)).getTextContent(); const iso=P.detectDate(tc.items.map(i=>i.str).join(' '));
+      if(iso) dataISO=iso.slice(0,10);
+    }catch(e){}
+  }
+  const titulo=(file.name||'Exame').replace(/\.[^.]+$/,'').slice(0,60);
+  formModal({
+    title:'Arquivar exame', subtitle:'Só confirmo a data — não digito valor nenhum.', submitLabel:'Guardar',
+    fields:[ {name:'titulo',label:'Título',value:titulo}, {name:'data',label:'Data da coleta',type:'date',required:true,value:dataISO} ],
+    onSubmit: async v=>{
+      const fid=uid();
+      try{ await idbSave(fid,file); }
+      catch(e){ closeModal(); examesMsg('warn','Falha ao guardar o arquivo: '+escapeHtml(e.message)); return; }
+      DB.events.push({ id:uid(), patient_id:curPat.id, encounter_id:curEnc.id, kind:'exam_doc',
+        collection_datetime:isoFromDateInput(v.data), title:(v.titulo||'Exame').trim()||'Exame',
+        mime:file.type||(isPdf?'application/pdf':'image/*'), filename:file.name||'', file_id:fid,
+        created_at:new Date().toISOString() });
+      save(); closeModal(); setTab('exames');
+      examesMsg('ok','Exame guardado em <b>'+fmtDay(isoFromDateInput(v.data))+'</b>.');
+    }
+  });
+}
+
+function examDocs(){ return (DB.events||[]).filter(e=>e.kind==='exam_doc' && e.encounter_id===(curEnc&&curEnc.id)); }
+function renderExames(){
+  const el=document.getElementById('examesBody'); if(!el)return;
+  const docs=examDocs();
+  if(!docs.length){ el.innerHTML='<p class="muted">Nenhum exame arquivado ainda. Arraste o PDF/foto acima — ele fica guardado na data da coleta, sem você digitar nada.</p>'; return; }
+  const byDay={}; docs.forEach(d=>{ const k=(d.collection_datetime||'').slice(0,10); (byDay[k]=byDay[k]||[]).push(d); });
+  const days=Object.keys(byDay).sort().reverse();
+  el.innerHTML=days.map(day=>`<div class="card" style="margin-bottom:10px">
+    <h2 style="margin:0 0 4px;font-size:15px">${fmtDay(day)} <span class="small muted">· ${byDay[day].length} exame(s)</span></h2>
+    ${byDay[day].map(d=>`<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--line2)">
+      <span>📄 ${escapeHtml(d.title||'Exame')}</span><div class="grow"></div>
+      <button class="btn sm" data-open="${d.id}">Abrir</button>
+      <button class="btn sm ghost" data-delx="${d.id}">Excluir</button>
+    </div>`).join('')}</div>`).join('');
+  el.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>abrirExame(b.dataset.open));
+  el.querySelectorAll('[data-delx]').forEach(b=>b.onclick=()=>excluirExame(b.dataset.delx));
+}
+async function abrirExame(id){
+  const ev=examDocs().find(e=>e.id===id); if(!ev)return;
+  let blob; try{ blob=await idbGet(ev.file_id); }catch(e){}
+  if(!blob){ alert('Arquivo não encontrado neste navegador.'); return; }
+  const url=URL.createObjectURL(blob), isPdf=(ev.mime||'').indexOf('pdf')>=0;
+  openModal(`<h3 style="margin:0 0 8px">${escapeHtml(ev.title||'Exame')} — ${fmtDay(ev.collection_datetime)}</h3>
+    ${isPdf ? `<iframe src="${url}" style="width:100%;height:68vh;border:1px solid var(--line2);border-radius:8px"></iframe>`
+            : `<img src="${url}" style="max-width:100%;max-height:68vh;display:block;margin:0 auto;border:1px solid var(--line2);border-radius:8px">`}
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <a class="btn sm" href="${url}" target="_blank" rel="noopener">Abrir em nova aba / imprimir</a>
+      <button class="btn sm ghost" id="xClose">Fechar</button></div>`);
+  document.getElementById('xClose').onclick=()=>{ URL.revokeObjectURL(url); closeModal(); };
+}
+function excluirExame(id){
+  const ev=examDocs().find(e=>e.id===id); if(!ev)return;
+  confirmModal({ title:'Excluir exame', message:'Remover este exame arquivado? Não dá pra desfazer.', danger:true, confirmLabel:'Excluir',
+    onYes:async()=>{ await idbDel(ev.file_id); DB.events=DB.events.filter(e=>e.id!==id); save(); renderExames(); } });
 }
 
 /* ===================== Alterações ===================== */
