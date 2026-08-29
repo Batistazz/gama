@@ -78,7 +78,7 @@
     {key:'acido_urico',label:'Ácido úrico',grupo:'Metabólico',unit:'mg/dL',dec:1,ref:[3.5,7.2],plaus:[0.5,25],aliases:['acido urico','ac urico','urato']},
     {key:'ldh',label:'DHL (LDH)',grupo:'Metabólico',unit:'U/L',dec:0,ref:[120,246],plaus:[50,10000],aliases:['lactato desidrogenase','desidrogenase latica','ldh','dhl']},
     // Inflamatórios
-    {key:'pcr',label:'PCR',grupo:'Inflamatórios',unit:'mg/L',dec:1,ref:[0,5],plaus:[0,600],aliases:['proteina c reativa','pcr']},
+    {key:'pcr',label:'PCR',grupo:'Inflamatórios',unit:'mg/L',dec:1,ref:[0,5],plaus:[0,2000],aliases:['proteina c reativa','pcr']},
     {key:'vhs',label:'VHS',grupo:'Inflamatórios',unit:'mm/h',dec:0,ref:[0,20],plaus:[0,150],aliases:['vhs','hemossedimentacao','esr']},
     {key:'procalcitonina',label:'Procalcitonina',grupo:'Inflamatórios',unit:'ng/mL',dec:2,ref:[0,0.5],plaus:[0,100],aliases:['procalcitonina','pct']},
     // Hepático
@@ -109,6 +109,9 @@
   ];
 
   var FIXED_PANEL = ['hemoglobina','hematocrito','leucocitos','bastoes','plaquetas','ureia','creatinina','sodio','potassio','cloro','calcio','magnesio','fosforo','glicose','pcr'];
+  // Única lista autorizada para preenchimento automático. O catálogo maior continua útil
+  // para reconhecer e nomear exames que devem ser anotados manualmente.
+  var AUTO_IMPORT_KEYS = FIXED_PANEL.slice();
   // exames SECUNDÁRIOS: existem no catálogo (parseiam certo), mas NÃO poluem o "painel" — só em "Todos os exames"
   var SECONDARY = ['hemacias','hcm','chcm','monocitos','eosinofilos','basofilos','linfocitos_reativos','metamielocitos','mielocitos','promielocitos','blastos','celulas_atipicas','vpm'];
   // painel prevalente de clínica médica (usado na FOLHA EM BRANCO) — hemograma enxuto (9)
@@ -392,7 +395,7 @@
       var l = lines[i], ln = norm(l);
 
       // atualiza a data de coleta corrente (cada página do laudo tem a sua "COLETA: dd/mm/aaaa")
-      var _cd = collectionDateOf(l); if(_cd) curDate = _cd;
+      var _cd = collectionDateOf(l); if(_cd){ curDate = _cd; if(current && !current.hasValue) current.result.collection_dateISO = _cd; }
 
       // linha de REFERÊNCIA (começa com "Valor de referência"/"VR"…) → aplica ao exame anterior, nunca vira exame
       if(isReferenceHeader(ln)){
@@ -465,17 +468,80 @@
     }
   }
 
+  /* ---------- triagem conservadora para importação automática ----------
+     Erra por omissão: qualquer dúvida bloqueia a linha, mas ainda informa o que foi identificado. */
+  function unitToken(unit){
+    return norm(unit).replace(/³/g,'3').replace(/²/g,'2').replace(/[µμ]/g,'u').replace(/\s+/g,'');
+  }
+  function unitsCompatible(actual, expected){
+    return !!actual && !!expected && unitToken(actual)===unitToken(expected);
+  }
+  function documentNotices(text){
+    var t=norm(text), out=[];
+    if(/urocultura|hemocultura|coprocultura|antibiograma|antimicrobiano|\bufc\b|unidades formadoras/.test(t))
+      out.push({code:'culture',label:'Cultura/antibiograma',message:'Cultura identificada — anotar manualmente.'});
+    if(/tomografia|radiograf|ultrassonograf|ultra-?som|\busg\b|ressonancia magnetica|densitometria|mamografia|ecocardiograma|\bdoppler\b|cintilografia|angiotomografia|colonoscopia|\bendoscopia\b|\braio-?\s?x\b/.test(t))
+      out.push({code:'imaging',label:'Laudo de imagem',message:'Laudo de imagem identificado — anotar manualmente.'});
+    if(/anatomopatol|histopatol|biopsia|biopsia|citopatol|citologia onc[oó]tica/.test(t))
+      out.push({code:'pathology',label:'Anatomopatológico/citologia',message:'Laudo anatomopatológico/citológico identificado — anotar manualmente.'});
+    if(/sorolog|anti[- ]?hiv|hbsag|anti[- ]?hcv|vdrl|\bigg\b|\bigm\b|nao reagente|não reagente/.test(t))
+      out.push({code:'qualitative',label:'Sorologia/qualitativo',message:'Resultado qualitativo ou sorologia identificado — anotar manualmente.'});
+    if(/gasometria|urina tipo 1|urina rotina|coagulograma|troponina|creatinofo?sfoquinase|bacterioscopia|coloracao pelo gram|coloração pelo gram/.test(t))
+      out.push({code:'other_lab',label:'Exame laboratorial fora do quadro',message:'Exame laboratorial fora do quadro identificado — não incluído.'});
+    return out;
+  }
+  function triageConservative(text, fallbackDateISO){
+    text=String(text||'');
+    var parsed=parseLabText(text), accepted=[], blocked=[], needsDate=false;
+    parsed.results.forEach(function(r){
+      var c=catByKey(r.exam_name_normalized), reasons=[];
+      // O quadro padroniza PCR em mg/L; alguns laboratórios imprimem mg/dL.
+      if(c && r.exam_name_normalized==='pcr' && unitToken(r.unit)==='mg/dl' && unitToken(c.unit)==='mg/l'){
+        r.value_numeric = r.value_numeric==null ? null : r.value_numeric*10;
+        r.unit = c.unit;
+        r.unit_conversion = 'mg/dL → mg/L';
+      }
+      if(AUTO_IMPORT_KEYS.indexOf(r.exam_name_normalized)<0) reasons.push('exame fora do painel automático');
+      if(['numeric','less_than','greater_than'].indexOf(r.value_type)<0) reasons.push('resultado não numérico');
+      if(r.value_numeric==null || !isFinite(r.value_numeric)) reasons.push('número ausente ou inválido');
+      if(!c) reasons.push('exame fora do catálogo');
+      if(c && !unitsCompatible(r.unit,c.unit)) reasons.push(r.unit?'unidade incompatível':'unidade ausente');
+      if(r.confidence!=='ok') reasons.push(r.confidence_reason||'extração incerta');
+      if(c && r.value_numeric!=null && (r.value_numeric<c.plaus[0] || r.value_numeric>c.plaus[1])) reasons.push('valor fora da faixa plausível');
+      var dateISO=r.collection_dateISO||fallbackDateISO||parsed.dateISO||null;
+      if(reasons.length){
+        var sourceNorm=norm(r.source_text||'');
+        var cultureArtifact=/\bufc\b|escherichia|klebsiella|staphylococcus|streptococcus|enterococcus|pseudomonas|acinetobacter|proteus|serratia|candida/.test(sourceNorm);
+        blocked.push({key:r.exam_name_normalized,label:r.exam_name_original||(c&&c.label)||r.exam_name_normalized,reasons:reasons,source_text:r.source_text||'',culture_artifact:cultureArtifact});
+      }else{
+        if(!dateISO) needsDate=true;
+        var safe={}; Object.keys(r).forEach(function(k){safe[k]=r[k];}); safe.collection_dateISO=dateISO;
+        accepted.push(safe);
+      }
+    });
+    var notices=documentNotices(text);
+    return {
+      kind:(notices.length&&accepted.length)?'mixed':(notices.length?notices[0].code:'lab'),
+      accepted:accepted, blocked:blocked, notices:notices, needsDate:needsDate,
+      dateISO:parsed.dateISO, recognizedCount:parsed.results.length
+    };
+  }
+
   /* ---------- API pública ---------- */
   var API = {
     parseLabText: parseLabText,
     parsePatientInfo: parsePatientInfo,
     detectKind: detectKind,
     parseCulture: parseCulture,
+    triageConservative: triageConservative,
+    unitsCompatible: unitsCompatible,
+    documentNotices: documentNotices,
     detectDate: detectDate,
     parseNumBR: parseNumBR,
     norm: norm,
     CATALOG: CATALOG,
     FIXED_PANEL: FIXED_PANEL,
+    AUTO_IMPORT_KEYS: AUTO_IMPORT_KEYS,
     SECONDARY: SECONDARY,
     BLANK_PANEL: BLANK_PANEL,
     GRUPOS: GRUPOS,

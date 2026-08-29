@@ -100,6 +100,8 @@
   .banner{padding:8px 12px;border-radius:8px;margin-bottom:10px;font-size:13px}
   .banner.ok{background:#e7f6ee;color:var(--ok);border:1px solid #bfe6cf}
   .banner.warn{background:var(--warnbg);color:var(--warn);border:1px solid #f0dcae}
+  .toast{position:fixed;right:18px;top:58px;z-index:70;width:min(430px,calc(100vw - 36px));box-shadow:0 8px 30px rgba(0,0,0,.16);display:none}
+  .toast.show{display:block}
   .drop{border:2px dashed var(--line);border-radius:9px;padding:16px;text-align:center;color:var(--muted);cursor:pointer;font-size:13px}
   .drop.over{border-color:var(--accent);background:#eafafc;color:var(--tx)}
 
@@ -201,7 +203,7 @@
       <div style="display:flex;gap:16px;margin-top:8px;border-top:1px solid var(--line2);padding-top:4px" class="noprint">
         <button class="btn tab active" data-tab="folhao">Painel</button>
         <button class="btn tab" data-tab="exames">Exames por data</button>
-        <button class="btn tab" data-tab="import">Importar (texto)</button>
+        <button class="btn tab" data-tab="import">Importar exames</button>
         <button class="btn tab" data-tab="alteracoes">Alterações</button>
       </div>
     </div>
@@ -242,16 +244,16 @@
     <!-- IMPORT -->
     <div class="tabview" id="tab-import" style="display:none">
       <div class="card">
-        <h2>Colar resultados (texto)</h2>
-        <p class="small muted">Só pra quando você tem o resultado como <b>texto</b> (copiado da tela do sistema): cole aqui e vira a grade comparativa — exato, sem OCR. <b>Se você só tem o PDF/foto do exame, use a aba “Exames por data”</b> (guarda o exame inteiro, sem digitar nada). Uma data por colagem.</p>
+        <h2>Importar resultados</h2>
+        <p class="small muted">Escolha o <b>PDF do laboratório</b>. O Gama lê o arquivo, pega a data da coleta e coloca no quadro os exames reconhecidos. Exames que não fazem parte do quadro são apenas informados.</p>
         <textarea id="pasteArea" placeholder="Ex.:
 Hemoglobina ......... 10,8 g/dL
 Valor de referência . 13,0 - 17,0
 CREATININA
 Resultado: 1,7 mg/dL
 Potássio: 5,2 mEq/L"></textarea>
-        <div class="drop noprint" id="drop" style="margin-top:8px">…ou arraste o <b>PDF/foto</b> do exame aqui — ele é <b>guardado por data</b> (na aba “Exames por data”), sem ler número.</div>
-        <input type="file" id="filePdf" accept="application/pdf,image/*" hidden>
+        <div class="drop noprint" id="drop" style="margin-top:8px">Arraste o <b>PDF do laboratório</b> aqui, ou clique para importar</div>
+        <input type="file" id="filePdf" accept="application/pdf" hidden>
         <div style="margin-top:10px"><button class="btn primary" id="btnProcess">Processar</button></div>
         <div id="importMsg" style="margin-top:10px"></div>
       </div>
@@ -265,10 +267,11 @@ Potássio: 5,2 mEq/L"></textarea>
 </main>
 
 <!-- MODAL célula -->
-<div class="modal-bg" id="modalBg"><div class="modal" id="modal"></div></div>
+<div class="toast banner ok" id="toast" role="status" aria-live="polite"></div>
+<div class="modal-bg" id="modalBg"><div class="modal" id="modal" role="dialog" aria-modal="true"></div></div>
 
-<script src="vendor/pdf.min.js"></script>
 <script src="vendor/tesseract/tesseract.min.js"></script>
+<script src="vendor/pdf.min.js"></script>
 <script src="parser.js"></script>
 <script>
 'use strict';
@@ -297,7 +300,7 @@ function obsDisplay(o){
   if(o.value_type==='numeric') return fmtNum(o.value_numeric,dec);
   if(o.value_type==='less_than') return '<'+fmtNum(o.value_numeric,dec);
   if(o.value_type==='greater_than') return '>'+fmtNum(o.value_numeric,dec);
-  return o.value_text||'—';
+  return escapeHtml(o.value_text||'—');
 }
 // Metadados do exame: do catálogo, ou (se fora do catálogo) da própria observação → grupo "Outros"
 function examMeta(key){
@@ -322,13 +325,16 @@ function renderPacientes(){
     const enc=activeEncounter(p.id);
     const n=DB.observations.filter(o=>o.patient_id===p.id).length;
     const age=ageFrom(p.birth_date), idp=[sexShort(p.sex),age!=null?age+'a':''].filter(Boolean).join('·');
-    return `<div class="pcard" data-id="${p.id}">
+    return `<div class="pcard" data-id="${escapeHtml(p.id)}" role="button" tabindex="0" aria-label="Abrir paciente ${escapeHtml(p.name||'—')}">
       <div class="nm">${escapeHtml(p.name||'—')}</div>
       <div class="di">${enc?('D'+diasInternacao(enc)+' de internação'):'sem internação'}</div>
       <div class="mt">${idp?escapeHtml(idp)+' · ':''}${enc&&enc.bed?('Leito '+escapeHtml(enc.bed)+' · '):''}${n} resultado${n!==1?'s':''}${enc?(' · adm. '+fmtDay(enc.admission_date)):''}</div>
     </div>`;
   }).join('');
-  el.querySelectorAll('.pcard').forEach(c=>c.onclick=()=>openPaciente(c.dataset.id));
+  el.querySelectorAll('.pcard').forEach(c=>{
+    c.onclick=()=>openPaciente(c.dataset.id);
+    c.onkeydown=e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); openPaciente(c.dataset.id); } };
+  });
 }
 document.getElementById('btnNovoPac').onclick=()=>{
   formModal({
@@ -371,7 +377,10 @@ document.getElementById('btnNovoPac').onclick=()=>{
   });
 };
 function parseBRDate(s){ const m=(s||'').match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/); if(!m)return new Date().toISOString(); const y=m[3].length===2?'20'+m[3]:m[3]; return new Date(+y,+m[2]-1,+m[1],8,0).toISOString(); }
-document.getElementById('btnWipe').onclick=()=>{ confirmModal({title:'Limpar tudo',message:'Apagar TODOS os dados deste navegador? Não dá pra desfazer — faça um Backup antes se quiser guardar.',danger:true,confirmLabel:'Apagar tudo',onYes:()=>{ DB=blank(); save(); renderPacientes(); }}); };
+document.getElementById('btnWipe').onclick=()=>{ confirmModal({title:'Limpar tudo',message:'Apagar TODOS os dados e arquivos deste navegador? Não dá pra desfazer — faça um Backup antes se quiser guardar.',danger:true,confirmLabel:'Apagar tudo',onYes:async()=>{
+  try{ await idbClear(); DB=blank(); curPat=null; curEnc=null; save(); renderPacientes(); show('pacientes'); showToast('Todos os dados e arquivos foram apagados.','ok'); }
+  catch(e){ alert('Não foi possível apagar os arquivos: '+e.message); }
+}}); };
 
 /* ===================== Abrir paciente ===================== */
 let curPat=null, curEnc=null, curTab='folhao';
@@ -496,15 +505,15 @@ function renderFolhao(){
       const series=dayValues(key,obsAll);
       h+='<tr>';
       if(gi===0) h+=`<td class="grpv" rowspan="${grp.keys.length}" title="Grupo: ${escapeHtml(grp.grupo)}"><span>${escapeHtml(GRP_LABEL[grp.grupo]||grp.grupo)}</span></td>`;
-      h+=`<td class="ex">${c.label} <span class="u">${c.unit||''}</span></td>`;
+      h+=`<td class="ex">${escapeHtml(c.label)} <span class="u">${escapeHtml(c.unit||'')}</span></td>`;
       days.forEach(d=>{
         const list=obsOfDay(key,d,obsAll); const o=list[list.length-1];
-        if(!o){ h+=`<td class="cell empty" data-k="${key}" data-d="${d}">·</td>`; return; }
+        if(!o){ h+=`<td class="cell empty" data-k="${escapeHtml(key)}" data-d="${escapeHtml(d)}">·</td>`; return; }
         const ab=abnormal(o); let cls='cell'; if(ab&&ab.dir==='low')cls+=' low'; if(ab&&ab.dir==='high')cls+=' high';
         if(o.confidence==='warn')cls+=' warncell';
         const mk=(ab&&ab.mark)?`<span class="mk">${ab.mark}</span>`:'';
         const nx=list.length>1?`<span class="nx">${list.length}×</span>`:'';
-        h+=`<td class="${cls}" data-k="${key}" data-d="${d}" title="${o.confidence==='warn'?'incerto: '+(o.confidence_reason||'')+' — confira':''}">${obsDisplay(o)}${mk}${nx}</td>`;
+        h+=`<td class="${cls}" data-k="${escapeHtml(key)}" data-d="${escapeHtml(d)}" title="${escapeHtml(o.confidence==='warn'?'incerto: '+(o.confidence_reason||'')+' — confira':'')}">${obsDisplay(o)}${mk}${nx}</td>`;
       });
       for(let i=0;i<NBLANK;i++) h+='<td class="fillcol bk">&nbsp;</td>';
       const nums=series.filter(s=>s.v!=null);
@@ -547,11 +556,11 @@ function renderEvents(){
 function cellModal(examKey,day){
   const c=examMeta(examKey); const obs=encObs();
   const list=obsOfDay(examKey,day,obs);
-  let h=`<h3>${c.label} <span class="muted small">${c.unit||''}</span></h3><div class="muted small">${fmtDay(day)}</div>`;
+  let h=`<h3>${escapeHtml(c.label)} <span class="muted small">${escapeHtml(c.unit||'')}</span></h3><div class="muted small">${fmtDay(day)}</div>`;
   if(list.length){
     h+=list.map(o=>`<div class="valrow">
       <span class="v">${obsDisplay(o)}</span><span class="t">${fmtTime(o.collection_datetime)}</span>
-      ${o.confidence==='warn'?'<span class="flag warn" title="'+(o.confidence_reason||'')+'">incerto</span>':''}
+      ${o.confidence==='warn'?'<span class="flag warn" title="'+escapeHtml(o.confidence_reason||'')+'">incerto</span>':''}
       <div style="flex:1"></div>
       <button class="btn sm ghost" data-del="${o.id}">excluir</button>
       </div>${o.source_text?('<div class="src">'+escapeHtml(o.source_text)+'</div>'):''}`).join('');
@@ -565,8 +574,9 @@ function cellModal(examKey,day){
         <button class="btn primary sm" id="mSave">Salvar valor</button>
         <button class="btn sm ghost" id="mClose">Fechar</button>
       </div></div>`;
-  const m=document.getElementById('modal'); m.innerHTML=h; document.getElementById('modalBg').classList.add('show');
-  m.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{ DB.observations=DB.observations.filter(o=>o.id!==b.dataset.del); save(); renderFolhao(); cellModal(examKey,day); });
+  openModal(h);
+  const m=document.getElementById('modal');
+  m.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>confirmModal({title:'Excluir valor',message:'Excluir este resultado da grade? Não dá pra desfazer.',danger:true,confirmLabel:'Excluir',onYes:()=>{ DB.observations=DB.observations.filter(o=>o.id!==b.dataset.del); save(); renderFolhao(); showToast('Resultado excluído.','ok'); }}));
   document.getElementById('mClose').onclick=closeModal;
   document.getElementById('mSave').onclick=()=>{
     const raw=document.getElementById('mVal').value.trim(); if(!raw)return;
@@ -579,21 +589,29 @@ function upsertManual(examKey,iso,raw){
   let vt='qualitative',vn=null,vtext=raw;
   const mc=raw.match(/^([<>])\s*=?\s*([\d.]+,?\d*)/);
   if(mc){ vt=mc[1]==='<'?'less_than':'greater_than'; vn=P.parseNumBR(mc[2]); vtext=mc[1]+mc[2]; }
-  else { const n=P.parseNumBR(raw.replace(/[^\d.,-]/g,'')); if(n!=null&&/\d/.test(raw)){ vt='numeric'; vn=n; vtext=raw; } }
+  else if(/^[+-]?(?:\d{1,3}(?:\.\d{3})+|\d+)(?:[,.]\d+)?$/.test(raw)){
+    const n=P.parseNumBR(raw); if(n!=null){ vt='numeric'; vn=n; vtext=raw; }
+  }
   DB.observations.push({id:uid(),patient_id:curPat.id,encounter_id:curEnc.id,category:'laboratory',
     exam_name_original:c.label,exam_name_normalized:examKey,value_type:vt,value_numeric:vn,value_text:vtext,
     unit:c.unit,reference_min:null,reference_max:null,reference_text:null,collection_datetime:new Date(iso).toISOString(),
     source_type:'manual',source_text:'(digitado manualmente)',confidence:'ok',created_at:new Date().toISOString()});
 }
 document.getElementById('modalBg').onclick=e=>{ if(e.target.id==='modalBg')closeModal(); };
-function closeModal(){ document.getElementById('modalBg').classList.remove('show'); }
+function closeModal(){ document.getElementById('modalBg').classList.remove('show'); runModalCleanup(); }
 function escapeHtml(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 /* ===================== Modais reutilizáveis (form + confirm) ===================== */
 const SEX_OPTS=[{value:'',label:'—'},{value:'F',label:'Feminino'},{value:'M',label:'Masculino'}];
 /* rótulo curto do grupo na coluna vertical (o nome cheio fica no title/hover) */
 const GRP_LABEL={'Função renal':'Renal'};
-function openModal(html){ document.getElementById('modal').innerHTML=html; document.getElementById('modalBg').classList.add('show'); }
+let modalCleanup=null, toastTimer=null;
+function runModalCleanup(){ if(modalCleanup){ const fn=modalCleanup; modalCleanup=null; try{fn();}catch(e){} } }
+function openModal(html,onClose){ runModalCleanup(); modalCleanup=onClose||null; document.getElementById('modal').innerHTML=html; document.getElementById('modalBg').classList.add('show'); }
+function showToast(html,kind){
+  const el=document.getElementById('toast'); clearTimeout(toastTimer); el.className='toast banner '+(kind==='warn'?'warn':'ok')+' show'; el.innerHTML=html;
+  toastTimer=setTimeout(()=>el.classList.remove('show'),5000);
+}
 function formModal(opts){
   const fields=opts.fields||[];
   const body=fields.map(f=>{
@@ -663,20 +681,35 @@ function renderPrintHeader(){
 
 /* ===================== Importar ===================== */
 document.getElementById('btnProcess').onclick=()=>doProcess(document.getElementById('pasteArea').value);
-function doProcess(text){
+function conservativeMessage(report,added,skipped){
+  const parts=[];
+  if(added)parts.push(`<b>${added} resultado(s) importado(s).</b>`);
+  if(skipped)parts.push(`${skipped} duplicado(s) ignorado(s).`);
+  (report.notices||[]).forEach(n=>parts.push(escapeHtml(n.message)));
+  const labels=[...new Set((report.blocked||[]).filter(x=>!x.culture_artifact).map(x=>x.label).filter(Boolean))];
+  if(labels.length){
+    const shown=labels.slice(0,5).map(escapeHtml).join(', '), extra=labels.length>5?` e mais ${labels.length-5}`:'';
+    parts.push(`${labels.length} exame(s) fora do quadro não incluído(s): <b>${shown}${extra}</b>.`);
+  }
+  if(!parts.length)parts.push('Nenhum exame do quadro foi identificado neste arquivo.');
+  return parts.join(' ');
+}
+function doProcess(text,fallbackDateISO){
   if(!text||!text.trim()){ msgImport('warn','Cole algum texto primeiro.'); return; }
   if(!curEnc){ msgImport('warn','Paciente sem internação.'); return; }
-  const kind=P.detectKind(text);
-  if(kind==='culture'){ processCulture(text); return; }
-  if(kind==='imaging'){ msgImport('warn','Detectei um laudo de <b>imagem</b> (RX/TC/USG/RM) — essa parte entra na próxima etapa. Por ora, cole resultados de laboratório ou culturas.'); return; }
-  const {results,dateISO}=P.parseLabText(text);
-  if(!results.length){ msgImport('warn','Nada reconhecido. Se veio de um PDF/sistema diferente, me mande esse texto que eu ajusto o parser.'); return; }
-  if(dateISO){ commitResults(results,dateISO); return; }
-  formModal({
-    title:'Qual a data destes exames?', subtitle:'Não achei a data no texto colado.', submitLabel:'Usar esta data',
-    fields:[{name:'d',label:'Data da coleta',type:'date',required:true,value:todayISOdate()}],
-    onSubmit:v=>{ closeModal(); commitResults(results,isoFromDateInput(v.d)); }
-  });
+  const report=P.triageConservative(text,fallbackDateISO);
+  if(report.accepted.length&&report.needsDate&&!fallbackDateISO){
+    formModal({
+      title:'Qual a data destes exames?', subtitle:'Não achei a data da coleta no documento. Esta data será usada no quadro.', submitLabel:'Usar esta data',
+      fields:[{name:'d',label:'Data da coleta',type:'date',required:true,value:todayISOdate()}],
+      onSubmit:v=>{ closeModal(); doProcess(text,isoFromDateInput(v.d)); }
+    });
+    return;
+  }
+  if(!report.accepted.length){
+    const msg=conservativeMessage(report,0,0); msgImport('warn',msg); showToast(msg,'warn'); return;
+  }
+  commitResults(report.accepted,fallbackDateISO||report.dateISO,report);
 }
 function processCulture(text){
   const cult=P.parseCulture(text);
@@ -688,134 +721,123 @@ function processCulture(text){
   });
 }
 function commitCulture(cult,useISO){
-  DB.events.push({id:uid(),patient_id:curPat.id,encounter_id:curEnc.id,kind:'culture',
+  const next={id:uid(),patient_id:curPat.id,encounter_id:curEnc.id,kind:'culture',
     collection_datetime:useISO,title:cult.title,material:cult.material,growth:cult.growth,
     organism:cult.organism,cfu:cult.cfu,antibiogram:cult.antibiogram,
     source_type:'import',source_text:cult.source_text,confidence:cult.confidence,confidence_reason:cult.confidence_reason,
-    created_at:new Date().toISOString()});
+    created_at:new Date().toISOString()};
+  const duplicate=(DB.events||[]).some(e=>e.encounter_id===next.encounter_id&&e.kind==='culture'&&e.collection_datetime===next.collection_datetime&&e.source_text===next.source_text);
+  if(!duplicate)DB.events.push(next);
   save();
   document.getElementById('pasteArea').value='';
   const g=cult.growth||'indefinido';
-  msgImport(cult.confidence==='warn'?'warn':'ok',
-    `${escapeHtml(cult.title)} (${g})${cult.organism?': '+escapeHtml(cult.organism):''}${cult.antibiogram.length?' · '+cult.antibiogram.length+' antibióticos':''} — adicionada.${cult.confidence==='warn'?' <b>Confira</b> ('+escapeHtml(cult.confidence_reason)+').':''}`);
+  const msg=duplicate
+    ? 'Esta cultura já estava registrada e não foi duplicada.'
+    : `${escapeHtml(cult.title)} (${g})${cult.organism?': '+escapeHtml(cult.organism):''}${cult.antibiogram.length?' · '+cult.antibiogram.length+' antibióticos':''} — adicionada.${cult.confidence==='warn'?' <b>Confira</b> ('+escapeHtml(cult.confidence_reason)+').':''}`;
+  msgImport(cult.confidence==='warn'?'warn':'ok',msg); showToast(msg,cult.confidence==='warn'?'warn':'ok');
   setTab('folhao');
 }
-function commitResults(results,useISO){
-  let ok=0,warn=0; const datas=new Set();
+function commitResults(results,useISO,report){
+  let ok=0,warn=0,skipped=0; const datas=new Set();
+  const signature=o=>[
+    o.encounter_id,o.exam_name_normalized,o.collection_datetime,o.value_type,
+    o.value_numeric==null?'':String(o.value_numeric),o.value_text||'',o.unit||''
+  ].join('\u001f');
+  const existing=new Set(DB.observations.filter(o=>o.encounter_id===curEnc.id).map(signature));
   results.forEach(r=>{
     const iso=r.collection_dateISO||useISO; datas.add(iso.slice(0,10));
-    DB.observations.push({id:uid(),patient_id:curPat.id,encounter_id:curEnc.id,category:'laboratory',
+    const next={id:uid(),patient_id:curPat.id,encounter_id:curEnc.id,category:'laboratory',
       exam_name_original:r.exam_name_original,exam_name_normalized:r.exam_name_normalized,
       value_type:r.value_type,value_numeric:r.value_numeric,value_text:r.value_text,unit:r.unit||(P.catByKey(r.exam_name_normalized)||{}).unit,
       reference_min:r.reference_min,reference_max:r.reference_max,reference_text:r.reference_text,
       collection_datetime:iso,source_type:'import',source_text:r.source_text,confidence:r.confidence,confidence_reason:r.confidence_reason,
-      created_at:new Date().toISOString()});
+      created_at:new Date().toISOString()};
+    const sig=signature(next);
+    if(existing.has(sig)){ skipped++; return; }
+    existing.add(sig); DB.observations.push(next);
     if(r.confidence==='warn')warn++; else ok++;
   });
   save();
   document.getElementById('pasteArea').value='';
   const dl=[...datas].sort();
   const quando = dl.length>1 ? (dl.length+' datas ('+dl.map(d=>d.slice(8,10)+'/'+d.slice(5,7)).join(', ')+')') : fmtDay(dl[0]||useISO);
-  const msg=`${results.length} resultado(s) adicionado(s) em ${quando}. ${warn?('<b>'+warn+' incerto(s)</b> (amarelo no painel) — confira.'):'Todos com boa confiança.'}`;
-  msgImport(warn?'warn':'ok',msg);
+  const added=ok+warn;
+  const msg=report?conservativeMessage(report,added,skipped):(added
+    ? `${added} resultado(s) adicionado(s) em ${quando}.${skipped?' '+skipped+' duplicado(s) ignorado(s).':''}`
+    : `Nenhum resultado novo: ${skipped} duplicado(s) já estava(m) na grade.`);
+  const hasManual=report&&((report.blocked||[]).length||(report.notices||[]).length);
+  msgImport(hasManual?'warn':'ok',msg); showToast(msg,hasManual?'warn':'ok');
   setTab('folhao');
 }
 function msgImport(kind,html){ document.getElementById('importMsg').innerHTML=`<div class="banner ${kind}">${html}</div>`; }
 
-/* Import de laudo → texto → mesmo pipeline (Processar).
-   PDF com camada de texto: extrai direto. PDF-imagem (scan) ou FOTO: cai no OCR offline
-   (Tesseract.js em WebAssembly, roda no navegador — nenhum dado sai do aparelho). */
-// Arrastar arquivo (em qualquer das duas abas) → ARQUIVAR POR DATA (sem OCR, sem ler número).
-function wireDrop(dropId, inputId){
+/* A aba Importar lê PDF laboratorial; a aba Exames por data arquiva o original. */
+function wireDrop(dropId, inputId, handler, ariaLabel){
   const drop=document.getElementById(dropId), inp=document.getElementById(inputId);
   if(!drop||!inp) return;
+  drop.setAttribute('role','button'); drop.setAttribute('tabindex','0'); drop.setAttribute('aria-label',ariaLabel||'Escolher arquivo do exame');
   drop.onclick=()=>inp.click();
-  inp.onchange=e=>{ if(e.target.files[0])arquivarExame(e.target.files[0]); inp.value=''; };
+  drop.onkeydown=e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); inp.click(); } };
+  inp.onchange=e=>{ if(e.target.files[0])handler(e.target.files[0]); inp.value=''; };
   ['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
   ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
-  drop.addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f)arquivarExame(f); });
+  drop.addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f)handler(f); });
 }
-wireDrop('drop','filePdf');
-wireDrop('dropExame','fileExame');
-
-function lerArquivo(file){
-  if(file.type==='application/pdf' || /\.pdf$/i.test(file.name)) return lerPDF(file);
-  if(/^image\//.test(file.type) || /\.(png|jpe?g|webp|bmp|gif)$/i.test(file.name)) return lerImagem(file);
-  msgImport('warn','Formato não suportado. Use o <b>PDF</b> do laudo ou uma <b>foto</b> (JPG/PNG).');
-}
-
-/* ---- OCR offline (Tesseract.js). Worker criado sob demanda e reutilizado; PT-BR "fast". ---- */
-let _ocrWorker=null, _ocrCtx='';
-async function getOcrWorker(){
-  if(_ocrWorker) return _ocrWorker;
-  if(!window.Tesseract) throw new Error('OCR não carregou (vendor/tesseract).');
-  msgImport('ok','Preparando OCR (só na 1ª vez)…');
-  _ocrWorker = await Tesseract.createWorker('por', 1, {
-    workerPath:'vendor/tesseract/worker.min.js',
-    corePath:'vendor/tesseract/',
-    langPath:'vendor/tesseract/',
-    logger:m=>{
-      const pct=Math.round((m.progress||0)*100);
-      if(m.status==='recognizing text') msgImport('ok', _ocrCtx+' — <b>'+pct+'%</b>');
-      else if(/load|initiali/i.test(m.status)) msgImport('ok','Preparando OCR (só na 1ª vez)… '+escapeHtml(m.status)+' '+pct+'%');
-    }
-  });
-  return _ocrWorker;
-}
-async function ocrCanvas(canvas){ const w=await getOcrWorker(); const {data}=await w.recognize(canvas); return data.text||''; }
-async function pageToCanvas(page, targetW){
-  const base=page.getViewport({scale:1});
-  const scale=Math.min(4, Math.max(1.5, targetW/base.width));
-  const vp=page.getViewport({scale});
-  const c=document.createElement('canvas'); c.width=Math.ceil(vp.width); c.height=Math.ceil(vp.height);
-  await page.render({canvasContext:c.getContext('2d'), viewport:vp}).promise;
-  return c;
-}
-
-async function lerPDF(file){
-  if(!window.pdfjsLib){ msgImport('warn','Leitor de PDF não carregou.'); return; }
-  msgImport('ok','Lendo PDF…');
+async function importarArquivo(file){
+  const isPdf=file.type==='application/pdf'||/\.pdf$/i.test(file.name||'');
+  if(!isPdf){ msgImport('warn','Use o PDF do laboratório.'); return; }
+  if(!window.pdfjsLib){ msgImport('warn','O leitor local de PDF não carregou.'); return; }
+  msgImport('ok','Lendo o PDF…');
   try{
-    const buf=await file.arrayBuffer(); const pdf=await pdfjsLib.getDocument({data:buf}).promise;
-    let linhas=[], ocrPages=0;
+    const buf=await file.arrayBuffer(), pdf=await pdfjsLib.getDocument({data:buf}).promise;
+    if(pdf.numPages>30){ msgImport('warn','Este PDF tem mais de 30 páginas. Separe o laudo em arquivos menores.'); return; }
+    const lines=[]; let ocrPages=0;
     for(let i=1;i<=pdf.numPages;i++){
-      const pg=await pdf.getPage(i); const tc=await pg.getTextContent();
-      const byY={}; tc.items.forEach(it=>{const y=Math.round(it.transform[5]);(byY[y]=byY[y]||[]).push({x:it.transform[4],s:it.str});});
+      msgImport('ok',`Lendo PDF — página ${i}/${pdf.numPages}…`);
+      const page=await pdf.getPage(i), tc=await page.getTextContent(), byY={};
+      tc.items.forEach(it=>{ const y=Math.round(it.transform[5]); (byY[y]=byY[y]||[]).push({x:it.transform[4],s:it.str}); });
       const pageLines=[]; Object.keys(byY).sort((a,b)=>b-a).forEach(y=>pageLines.push(byY[y].sort((a,b)=>a.x-b.x).map(p=>p.s).join(' ')));
-      if(pageLines.join('').replace(/\s/g,'').length>=20){ linhas.push(...pageLines); }   // tem camada de texto
-      else{                                                                                 // página-imagem → OCR
-        ocrPages++; _ocrCtx='Lendo por OCR — página '+i+'/'+pdf.numPages;
-        const txt=await ocrCanvas(await pageToCanvas(pg, 2200));
-        linhas.push(...txt.split(/\r?\n/));
+      if(pageLines.join('').replace(/\s/g,'').length>=20){ lines.push(...pageLines); }
+      else{
+        ocrPages++; _ocrCtx=`Lendo página ${i}/${pdf.numPages}`;
+        const canvas=await pageToCanvas(page,1800), txt=await ocrCanvas(canvas);
+        lines.push(...txt.split(/\r?\n/)); canvas.width=canvas.height=1;
       }
     }
-    document.getElementById('pasteArea').value=linhas.join('\n');
-    if(ocrPages) msgImport('warn','Li <b>'+ocrPages+'</b> página(s)-imagem por <b>OCR</b>. ⚠️ OCR erra número/unidade — <b>confira o texto acima</b> e clique <b>Processar</b>.');
-    else msgImport('ok','Texto extraído do PDF. Confira e clique <b>Processar</b>.');
-  }catch(e){ msgImport('warn','Falha ao ler o PDF: '+escapeHtml(e.message)); }
+    const text=lines.join('\n'); document.getElementById('pasteArea').value=text;
+    if(!text.trim()){ msgImport('warn','Não consegui ler este PDF.'); return; }
+    if(ocrPages) msgImport('ok',`OCR concluído em ${ocrPages} página(s). Colocando os exames no quadro…`);
+    doProcess(text);
+  }catch(e){ const msg='Não foi possível ler este PDF: '+escapeHtml(e.message); msgImport('warn',msg); showToast(msg,'warn'); }
 }
-
-async function lerImagem(file){
-  if(!window.Tesseract){ msgImport('warn','OCR não carregou (vendor/tesseract).'); return; }
-  msgImport('ok','Lendo foto por OCR…'); _ocrCtx='Lendo foto por OCR';
-  try{
-    const url=URL.createObjectURL(file);
-    const img=await new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=()=>rej(new Error('imagem inválida')); im.src=url; });
-    const scale=Math.min(3, Math.max(1, 2200/img.naturalWidth));
-    const c=document.createElement('canvas'); c.width=Math.round(img.naturalWidth*scale); c.height=Math.round(img.naturalHeight*scale);
-    c.getContext('2d').drawImage(img,0,0,c.width,c.height); URL.revokeObjectURL(url);
-    const txt=await ocrCanvas(c);
-    document.getElementById('pasteArea').value=txt;
-    msgImport('warn','Foto lida por <b>OCR</b>. ⚠️ OCR erra número/unidade — <b>confira o texto acima</b> e clique <b>Processar</b>.');
-  }catch(e){ msgImport('warn','Falha no OCR da foto: '+escapeHtml(e.message)); }
+let _ocrWorker=null, _ocrCtx='';
+async function getOcrWorker(){
+  if(_ocrWorker)return _ocrWorker;
+  if(!window.Tesseract)throw new Error('OCR local não carregou.');
+  msgImport('ok','Preparando a leitura do PDF…');
+  _ocrWorker=await Tesseract.createWorker('por',1,{
+    workerPath:'vendor/tesseract/worker.min.js', corePath:'vendor/tesseract/', langPath:'vendor/tesseract/',
+    logger:m=>{ const pct=Math.round((m.progress||0)*100); if(m.status==='recognizing text')msgImport('ok',`${_ocrCtx} — ${pct}%`); }
+  });
+  await _ocrWorker.setParameters({preserve_interword_spaces:'1'});
+  return _ocrWorker;
 }
+async function ocrCanvas(canvas){ const worker=await getOcrWorker(), result=await worker.recognize(canvas); return result.data.text||''; }
+async function pageToCanvas(page,targetWidth){
+  const base=page.getViewport({scale:1}), scale=Math.min(3,Math.max(1.4,targetWidth/base.width)), viewport=page.getViewport({scale});
+  const canvas=document.createElement('canvas'); canvas.width=Math.ceil(viewport.width); canvas.height=Math.ceil(viewport.height);
+  await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise; return canvas;
+}
+wireDrop('drop','filePdf',importarArquivo,'Escolher PDF do laboratório para importar');
+wireDrop('dropExame','fileExame',arquivarExame,'Escolher PDF ou foto para arquivar por data');
 
 /* ===================== Exames por data (arquivo — SEM ler número) ===================== */
 /* Arquivos (PDF/foto) são pesados → vão pro IndexedDB; só metadados no localStorage. */
 function idbOpen(){ return new Promise((res,rej)=>{ const r=indexedDB.open('gama_files',1); r.onupgradeneeded=()=>r.result.createObjectStore('files'); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
-async function idbSave(id,blob){ const db=await idbOpen(); return new Promise((res,rej)=>{ const t=db.transaction('files','readwrite'); t.objectStore('files').put(blob,id); t.oncomplete=()=>res(); t.onerror=()=>rej(t.error); }); }
-async function idbGet(id){ const db=await idbOpen(); return new Promise((res,rej)=>{ const t=db.transaction('files','readonly'); const q=t.objectStore('files').get(id); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); }); }
-async function idbDel(id){ const db=await idbOpen(); return new Promise((res)=>{ const t=db.transaction('files','readwrite'); t.objectStore('files').delete(id); t.oncomplete=()=>res(); t.onerror=()=>res(); }); }
+async function idbSave(id,blob){ const db=await idbOpen(); return new Promise((res,rej)=>{ const t=db.transaction('files','readwrite'); t.objectStore('files').put(blob,id); t.oncomplete=()=>{db.close();res();}; t.onerror=()=>{db.close();rej(t.error);}; }); }
+async function idbGet(id){ const db=await idbOpen(); return new Promise((res,rej)=>{ const t=db.transaction('files','readonly'); const q=t.objectStore('files').get(id); q.onsuccess=()=>{const value=q.result;db.close();res(value);}; q.onerror=()=>{db.close();rej(q.error);}; }); }
+async function idbDel(id){ const db=await idbOpen(); return new Promise((res)=>{ const t=db.transaction('files','readwrite'); t.objectStore('files').delete(id); t.oncomplete=()=>{db.close();res();}; t.onerror=()=>{db.close();res();}; }); }
+async function idbClear(){ const db=await idbOpen(); return new Promise((res,rej)=>{ const t=db.transaction('files','readwrite'); t.objectStore('files').clear(); t.oncomplete=()=>{db.close();res();}; t.onerror=()=>{db.close();rej(t.error);}; }); }
 
 function examesMsg(kind,html){ const el=document.getElementById('examesMsg'); if(el)el.innerHTML=`<div class="banner ${kind}">${html}</div>`; }
 
@@ -846,6 +868,7 @@ async function arquivarExame(file){
         created_at:new Date().toISOString() });
       save(); closeModal(); setTab('exames');
       examesMsg('ok','Exame guardado em <b>'+fmtDay(isoFromDateInput(v.data))+'</b>.');
+      showToast('Exame guardado em <b>'+fmtDay(isoFromDateInput(v.data))+'</b>.','ok');
     }
   });
 }
@@ -877,8 +900,8 @@ async function abrirExame(id){
             : `<img src="${url}" style="max-width:100%;max-height:68vh;display:block;margin:0 auto;border:1px solid var(--line2);border-radius:8px">`}
     <div style="display:flex;gap:8px;margin-top:10px">
       <a class="btn sm" href="${url}" target="_blank" rel="noopener">Abrir em nova aba / imprimir</a>
-      <button class="btn sm ghost" id="xClose">Fechar</button></div>`);
-  document.getElementById('xClose').onclick=()=>{ URL.revokeObjectURL(url); closeModal(); };
+      <button class="btn sm ghost" id="xClose">Fechar</button></div>`,()=>URL.revokeObjectURL(url));
+  document.getElementById('xClose').onclick=closeModal;
 }
 function excluirExame(id){
   const ev=examDocs().find(e=>e.id===id); if(!ev)return;
@@ -908,14 +931,51 @@ function renderAlteracoes(){
 }
 
 /* ===================== Backup export/import ===================== */
-document.getElementById('btnExport').onclick=()=>{
-  const blob=new Blob([JSON.stringify(DB,null,2)],{type:'application/json'});
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-  a.download='gama_backup_'+new Date().toISOString().slice(0,10)+'.json'; a.click();
+function blobToDataURL(blob){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(r.error); r.readAsDataURL(blob); }); }
+function dataURLToBlob(dataURL){
+  const m=String(dataURL||'').match(/^data:([^;,]*)(?:;[^,]*)?;base64,(.*)$/s); if(!m)throw new Error('anexo inválido');
+  const bin=atob(m[2]), bytes=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+  return new Blob([bytes],{type:m[1]||'application/octet-stream'});
+}
+function normalizedBackupDB(raw){
+  if(!raw||!Array.isArray(raw.patients)||!Array.isArray(raw.observations))throw new Error('estrutura de dados inválida');
+  return {patients:raw.patients,encounters:Array.isArray(raw.encounters)?raw.encounters:[],observations:raw.observations,events:Array.isArray(raw.events)?raw.events:[]};
+}
+document.getElementById('btnExport').onclick=async()=>{
+  const btn=document.getElementById('btnExport'), old=btn.textContent; btn.disabled=true; btn.textContent='Preparando…';
+  try{
+    const attachments=[]; let missing=0;
+    const docs=(DB.events||[]).filter(e=>e.kind==='exam_doc'&&e.file_id);
+    for(const ev of docs){
+      let file=null; try{file=await idbGet(ev.file_id);}catch(e){}
+      if(!file){missing++;continue;}
+      attachments.push({id:ev.file_id,filename:ev.filename||'',mime:ev.mime||file.type||'',data_url:await blobToDataURL(file)});
+    }
+    const pack={format:'gama-backup',version:2,exported_at:new Date().toISOString(),db:DB,attachments};
+    const blob=new Blob([JSON.stringify(pack)],{type:'application/json'}), url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download='gama_backup_'+new Date().toISOString().slice(0,10)+'.json'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    showToast(`Backup criado com ${DB.patients.length} paciente(s) e ${attachments.length} arquivo(s).${missing?' <b>'+missing+' arquivo(s) já estavam ausentes.</b>':''}`,missing?'warn':'ok');
+  }catch(e){ showToast('Falha ao criar backup: '+escapeHtml(e.message),'warn'); }
+  finally{btn.disabled=false;btn.textContent=old;}
 };
 document.getElementById('btnImportF').onclick=()=>document.getElementById('fileBackup').click();
-document.getElementById('fileBackup').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader();
-  r.onload=()=>{ try{ const d=JSON.parse(r.result); if(d.patients&&d.observations){ confirmModal({title:'Restaurar backup',message:'Substituir todos os dados atuais deste navegador por este backup?',danger:true,confirmLabel:'Substituir',onYes:()=>{ if(!d.events)d.events=[]; DB=d; save(); renderPacientes(); show('pacientes'); }}); } else alert('Arquivo inválido.'); }catch(err){ alert('Erro: '+err.message); } };
+document.getElementById('fileBackup').onchange=e=>{ const input=e.target, f=input.files[0]; if(!f)return; const r=new FileReader();
+  r.onload=()=>{ try{
+    const parsed=JSON.parse(r.result), restored=normalizedBackupDB(parsed.db||parsed), attachments=Array.isArray(parsed.attachments)?parsed.attachments:[];
+    const expected=new Set(restored.events.filter(x=>x.kind==='exam_doc'&&x.file_id).map(x=>x.file_id));
+    const supplied=new Set(attachments.map(x=>x&&x.id).filter(Boolean)), absent=[...expected].filter(id=>!supplied.has(id)).length;
+    const detail=`${restored.patients.length} paciente(s), ${restored.observations.length} resultado(s) e ${attachments.length} arquivo(s).`+(absent?` Atenção: ${absent} arquivo(s) arquivado(s) não estão dentro deste backup antigo.`:'');
+    confirmModal({title:'Restaurar backup',message:'Substituir todos os dados e arquivos atuais por este backup? '+detail,danger:true,confirmLabel:'Substituir',onYes:async()=>{
+      try{
+        const decoded=attachments.map(a=>{ if(!a||!a.id)throw new Error('anexo sem identificador'); return {id:a.id,blob:dataURLToBlob(a.data_url)}; });
+        await idbClear(); for(const a of decoded)await idbSave(a.id,a.blob);
+        DB=restored; curPat=null; curEnc=null; save(); renderPacientes(); show('pacientes');
+        showToast(`Backup restaurado: ${restored.patients.length} paciente(s) e ${decoded.length} arquivo(s).${absent?' '+absent+' arquivo(s) continuam ausentes.':''}`,absent?'warn':'ok');
+      }catch(err){ alert('Não foi possível restaurar: '+err.message); }
+    }});
+  }catch(err){ alert('Backup inválido: '+err.message); } finally{input.value='';} };
+  r.onerror=()=>{ alert('Não foi possível ler o backup.'); input.value=''; };
   r.readAsText(f); };
 
 /* ===================== Imprimir ===================== */
@@ -934,7 +994,7 @@ function renderBlankGrid(){
       const c=P.catByKey(key);
       h+='<tr>';
       if(gi===0) h+=`<td class="grpv" rowspan="${grp.keys.length}"><span>${escapeHtml(GRP_LABEL[grp.grupo]||grp.grupo)}</span></td>`;
-      h+=`<td class="ex">${c.label} <span class="u">${c.unit||''}</span></td>`;
+      h+=`<td class="ex">${escapeHtml(c.label)} <span class="u">${escapeHtml(c.unit||'')}</span></td>`;
       for(let i=0;i<NCOLS;i++) h+='<td class="bk">&nbsp;</td>';
       h+='</tr>';
     });

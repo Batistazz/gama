@@ -1,5 +1,8 @@
 /* Teste de regressão do parser. Roda: node test_parser.js  */
 const P = require('./parser.js');
+const fs = require('fs');
+const path = require('path');
+const fixtureDir = path.join(__dirname,'laudos_amostra');
 
 const amostraSecao5 = `HEMOGRAMA
 
@@ -358,6 +361,66 @@ Recem-nascidos..: 0.30 a 1.00 mg/dL
 Aldolase ............. 5,8 U/L`);
 check(!junk.results.some(r=>/prn|cordao|adultos|homens|recem/i.test(r.exam_name_normalized)), 'ruído/demografia não vira exame (veio '+junk.results.map(r=>r.exam_name_normalized).join(',')+')');
 check(junk.results.some(r=>r.exam_name_original==='Aldolase' && r.value_numeric===5.8), 'exame atípico legítimo (Aldolase 5,8) ainda entra');
+
+console.log('== triagem conservadora ==');
+const safeTriage = P.triageConservative(`COLETA: 29/08/2026 07:30
+Hemoglobina: 10,8 g/dL
+Creatinina: 1,20 mg/dL
+Sódio: 138 mEq/L`);
+check(safeTriage.accepted.length===3 && safeTriage.blocked.length===0, 'triagem aceita somente painel seguro completo');
+check(safeTriage.accepted.every(r=>r.collection_dateISO), 'triagem segura exige e preserva data');
+
+const wrongUnit = P.triageConservative('COLETA: 29/08/2026\nSódio: 138 mg/dL');
+check(wrongUnit.accepted.length===0 && wrongUnit.blocked.some(r=>r.reasons.includes('unidade incompatível')), 'unidade incompatível bloqueia importação');
+
+const unsupported = P.triageConservative('COLETA: 29/08/2026\nTGO: 42 U/L');
+check(unsupported.accepted.length===0 && unsupported.blocked.some(r=>r.key==='ast'), 'exame fora do painel automático fica manual');
+
+const mixed = P.triageConservative(`COLETA: 29/08/2026
+Hemoglobina: 10,8 g/dL
+UROCULTURA COM ANTIBIOGRAMA
+Escherichia coli 100.000 UFC/mL`);
+check(mixed.accepted.length===1 && mixed.notices.some(n=>n.code==='culture') && mixed.kind==='mixed', 'documento misto importa seguro e sinaliza cultura manual');
+
+const qualitative = P.triageConservative('COLETA: 29/08/2026\nHemoglobina: negativo');
+check(qualitative.accepted.length===0 && qualitative.blocked.some(r=>r.reasons.includes('resultado não numérico')), 'resultado qualitativo não entra na grade');
+
+const implausibleSafe = P.triageConservative('COLETA: 29/08/2026\nPotássio: 61 mEq/L');
+check(implausibleSafe.accepted.length===0 && implausibleSafe.blocked.some(r=>r.reasons.some(x=>/plausível|fisiológica/.test(x))), 'valor implausível é bloqueado');
+
+const noDate = P.triageConservative('Hemoglobina: 10,8 g/dL');
+const withFallback = P.triageConservative('Hemoglobina: 10,8 g/dL','2026-08-29T08:00:00.000Z');
+check(noDate.accepted.length===1 && noDate.needsDate, 'resultado seguro sem data pede uma data uma única vez');
+check(withFallback.accepted.length===1 && !withFallback.needsDate && withFallback.accepted[0].collection_dateISO, 'data informada destrava o resultado seguro');
+
+const collectionWins = P.triageConservative(`DATA: 24/08/2026
+CREATININA
+DATA DA COLETA.: 25/08/2026
+RESULTADO......: 0,85 mg/dL`);
+check(collectionWins.accepted.length===1 && collectionWins.accepted[0].collection_dateISO.slice(0,10)==='2026-08-25', 'DATA DA COLETA prevalece sobre a data do cabeçalho');
+
+const convertedPcr = P.triageConservative(`DATA DA COLETA.: 25/08/2026
+PROTEÍNA C REATIVA QUANTITATIVA
+RESULTADO......: 109,37 mg/dL`);
+check(convertedPcr.accepted.length===1 && convertedPcr.accepted[0].value_numeric===1093.7 && convertedPcr.accepted[0].unit==='mg/L', 'PCR em mg/dL é convertida para mg/L no quadro');
+
+check(P.unitsCompatible('/mm³','/mm3') && P.unitsCompatible('mEq/L','meq/l') && !P.unitsCompatible('mg/dL','mg/L'), 'normalização de unidade é estrita mas tolera grafia equivalente');
+check(P.documentNotices('BIÓPSIA — anatomopatológico').some(n=>n.code==='pathology'), 'anatomopatológico é identificado como manual');
+check(P.documentNotices('GASOMETRIA ARTERIAL').some(n=>n.code==='other_lab'), 'exame laboratorial fora do quadro é apenas informado');
+
+const fixtureExpected={laudo1_transcrito:10,laudo2_transcrito:12,laudo3_transcrito:12};
+Object.keys(fixtureExpected).forEach(name=>{
+  const fixture=path.join(fixtureDir,name+'.txt');
+  if(!fs.existsSync(fixture)){
+    console.log('  [local] '+name+' não disponível neste clone; validação confidencial ignorada');
+    return;
+  }
+  const text=fs.readFileSync(fixture,'utf8');
+  const report=P.triageConservative(text);
+  check(report.accepted.length===fixtureExpected[name]&&!report.needsDate, name+' importa apenas o painel seguro com data');
+});
+const cultureFixture=P.triageConservative(fs.readFileSync(path.join(fixtureDir,'culturas.md'),'utf8'));
+check(cultureFixture.accepted.length===0&&cultureFixture.notices.some(n=>n.code==='culture'), 'fixture de culturas é somente manual');
 
 console.log(`\n== RESULTADO: ${passes} ok, ${fails} falhas ==`);
 process.exit(fails>0 ? 1 : 0);

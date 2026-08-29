@@ -10,9 +10,15 @@ o "folhão" de exames, muito mais funcional. Voltado a acadêmicos e residentes.
   arquivos num host estático grátis; cada pessoa usa o próprio navegador → mexe nos próprios
   pacientes, **sem login, sem servidor de dados** (LGPD leve). Login+nuvem (Caminho 2, Supabase+RLS)
   fica pra quando validar — o parser e o folhão são idênticos, migração sem reescrita.
-- **Ingestão = colar texto** (núcleo) + **PDF** (pdf.js extrai texto → mesmo pipeline). **Uma data por colagem.**
+- **Ingestão numérica = texto colado ou PDF laboratorial.** O pdf.js extrai texto e páginas escaneadas
+  passam por OCR local; só o painel entra quando número, unidade, data, confiança e plausibilidade passam
+  nos filtros. O paciente aberto é assumido como correto pelo fluxo hospitalar, sem comparar nomes.
+  Exame laboratorial fora do quadro vira aviso e não é incluído. A aba “Exames por data” arquiva o original.
 - **Parser determinístico**, sem IA. Nunca chuta; na dúvida marca confiança `warn`.
 - **Modelo:** Paciente → Internação (Encounter) → Observação (registro individual, nunca coluna-por-dia).
+- **Backup v2:** JSON autocontido com o banco e os blobs dos PDFs/fotos em data URL. A restauração
+  repõe `localStorage` + `IndexedDB`; “Limpar tudo” apaga ambos. Backups v1 seguem compatíveis,
+  com aviso quando metadados de arquivos vierem sem os anexos.
 - **UX dinâmica:** cola/solta → folhão preenche na hora. Confiante entra normal; incerto entra
   **sinalizado** (amarelo), nunca em silêncio. Tudo editável na célula. Sem tela de revisão pesada.
 - **Painel fixo** sempre visível (hemograma básico, função renal, eletrólitos, PCR); exame
