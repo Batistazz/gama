@@ -260,5 +260,93 @@ const d16=md.results.filter(r=>(r.collection_dateISO||'').slice(0,10)==='2026-08
 check(d19.length===2 && d16.length===2, 'multi-data: 2 exames por data (veio 19:'+d19.length+' 16:'+d16.length+')');
 check(get(d19,'hemoglobina').value_numeric===13 && get(d16,'hemoglobina').value_numeric===11, 'Hb 13 em 19/08 e 11 em 16/08 (colunas distintas)');
 
+// laudo REAL Controllab/Santa Casa (regressão): nome do exame como cabeçalho + "RESULTADO:" portador,
+// hemograma diferencial %/absoluto, eGFR (NÃO NEGRO/NEGRO) suprimido, referência inline "De X a Y",
+// bloco "VALORES DE REFERÊNCIA" multi-linha que NÃO pode virar exame.
+console.log('== laudo real Controllab (regressão) ==');
+const controllab = `PACIENTE...............: FULANO DE TAL SILVA DATA: 24/08/2026 IDADE/SEXO 75 anos-Masculino
+SOLICITANTE Dr(a): Dra Ciclana de Tal ATENDIMENTO: 30-000000 CPF: 00000000000
+CONVÊNIO...............: SANTA CASA - SANTA CASA S IMPRESSÃO: 25/08/2026 07:36:00 C.I
+HEMOGRAMA COMPLETO
+COLETA.:25/08/2026
+MATERIAL.:Sangue
+VALOR DE REFERÊNCIA:
+HEMOGLOBINA............: 13,5 g/dL 13,0 a 18,0 g/dL
+HEMATÓCRITO............: 42,2 % 38,0 a 52,0 %
+LEUCÓCITOS - GLOBAL....: 6.380 céls/mm³ 4.000 a 11.000 céls/mm3
+NEUTRÓFILOS BASTONETES.: 0,0 % 0 /mm³ Até 1.000 céls/mm³
+NEUTRÓFILOS SEGMENTADOS: 83,0 % 5295 /mm³ 40,0 a 70,0 % - 1.300 a 6.000 céls/mm³
+LINFÓCITOS.............: 9,0 % 574 /mm³ 20,0 a 45,0 % - 1.000 a 3.500 céls/mm³
+PLAQUETAS..............: 269.200 /mm³ 140.000 a 450.000 /mm³
+CREATININA
+DATA DA COLETA.: 25/08/2026
+MÉTODO.........: Enzimático
+RESULTADO......: 0,85 mg/dL
+VALORES DE REFERÊNCIA:
+Recem-nascidos..: 0.30 a 1.00 mg/dL
+Homens..........: 0.60 a 1.30 mg/dL
+Mulheres........: 0.60 a 1.30 mg/dL
+RITMO DE FILTRAÇÃO GLOMERULAR
+MÉTODO: CÁLCULO PELA FÓRMULA CKD-EPI
+NÃO NEGRO......: 85,84 mL/min/1,73 m2
+NEGRO..........: 99,48 mL/min/1,73 m2
+PROTEÍNA C REATIVA QUANTITATIVA
+MÉTODO.........: IMUNO-TURBIDIMETRIA
+RESULTADO......: 109,37 mg/dL
+VALOR DE REFERÊNCIA: INFERIOR A 5 mg/dL
+POTÁSSIO
+MÉTODO.........: Eletrodo Seletivo
+RESULTADO......: 4,80 mEq/L
+VALOR DE REFERÊNCIA: De 3,5 a 5,1 mEq/L
+SÓDIO
+MÉTODO.........: Eletrodo Seletivo
+RESULTADO......: 147,6 mEq/L
+VALOR DE REFERÊNCIA: De 136 a 145 mEq/L
+EXAME REAVALIADO.
+URÉIA
+RESULTADO...........: 109,20 mg/dL
+VALOR DE REFERÊNCIA.: De 9 a 40 mg/dL`;
+const cl = P.parseLabText(controllab);
+const clv = {};
+cl.results.forEach(r=> clv[r.exam_name_normalized]=r);
+const clEsp = {
+  hemoglobina:{v:13.5}, hematocrito:{v:42.2}, leucocitos:{v:6380},
+  bastoes:{v:0}, neutrofilos:{v:5295}, linfocitos:{v:574}, plaquetas:{v:269200},
+  creatinina:{v:0.85}, pcr:{v:109.37}, potassio:{v:4.8}, sodio:{v:147.6}, ureia:{v:109.2},
+};
+Object.keys(clEsp).forEach(k=>{
+  const r=clv[k], e=clEsp[k];
+  check(!!r, 'Controllab extraiu '+k);
+  if(r) check(r.value_numeric===e.v, 'Controllab '+k+' = '+e.v+' (veio '+r.value_numeric+')');
+});
+// referência inline "De 136 a 145" capturada no sódio
+check(clv.sodio && clv.sodio.reference_min===136 && clv.sodio.reference_max===145, 'sódio referência 136-145 (veio '+(clv.sodio?clv.sodio.reference_min+'-'+clv.sodio.reference_max:'nada')+')');
+// eGFR (NÃO NEGRO/NEGRO) NÃO entra como exame
+check(!cl.results.some(r=>r.value_numeric===85.84||r.value_numeric===99.48), 'eGFR não vira exame');
+// nada de ruído/referência virando exame
+check(!cl.results.some(r=>/negro|resultado|recem|homens|mulheres|material|impress|atendimento|filtra|reavaliado|refer|paciente|solicitante/i.test(r.exam_name_original)), 'sem exame-fantasma (veio '+cl.results.map(r=>r.exam_name_original).join(' | ')+')');
+check(cl.results.length===12, 'Controllab: exatamente 12 exames (veio '+cl.results.length+')');
+check(cl.results.every(r=>r.confidence==='ok'), 'Controllab: todos com confiança ok (warns: '+cl.results.filter(r=>r.confidence==='warn').map(r=>r.exam_name_normalized+':'+r.confidence_reason).join(', ')+')');
+// todos amarrados na data de coleta 25/08
+check(cl.results.every(r=>(r.collection_dateISO||'').slice(0,10)==='2026-08-25'), 'Controllab: tudo em 25/08');
+
+// RUÍDO DE OCR (regressão): laudo-imagem passado por OCR vira "pontilhado" grudado em inteiro-lixo
+// ("HEMÁCIAS...ci221022022..1 3,95") e unidade corrompida (³→?, %→8). O parser deve pegar o VALOR
+// (número colado na unidade / após limpar o pontilhado), nunca o inteiro-lixo do leader.
+console.log('== ruído de OCR (pontilhado vira inteiro-lixo) ==');
+const ocrNoise = P.parseLabText(`HEMÁCIAS...ci221022022..1 3,95 milhões/mm?
+HEMOGLOBINA....1212212102201 12,1 qg/dL 12,0 a 16,0 qg/dL
+HEMATÓCRITO.....1..222..1..12 36,8 8 35,0 a 47,0 &
+PLAQUETAS. ...12220020222..1 216.900 /mm?
+HCO3...12110200t 22,8 mmol/L 21 a 28 mmol/L`);
+const onv = {}; ocrNoise.results.forEach(r=> onv[r.exam_name_normalized]=r);
+check(onv.hemacias && onv.hemacias.value_numeric===3.95, 'OCR: hemácias 3,95 (não o inteiro-lixo) (veio '+(onv.hemacias||{}).value_numeric+')');
+check(onv.hemoglobina && onv.hemoglobina.value_numeric===12.1, 'OCR: hemoglobina 12,1 (veio '+(onv.hemoglobina||{}).value_numeric+')');
+check(onv.hematocrito && onv.hematocrito.value_numeric===36.8, 'OCR: hematócrito 36,8 (veio '+(onv.hematocrito||{}).value_numeric+')');
+check(onv.plaquetas && onv.plaquetas.value_numeric===216900, 'OCR: plaquetas 216.900 (veio '+(onv.plaquetas||{}).value_numeric+')');
+check(onv.hco3 && onv.hco3.value_numeric===22.8, 'OCR: HCO3 22,8 mmol/L pela unidade (não o "3" do nome nem o leader) (veio '+(onv.hco3||{}).value_numeric+')');
+// nenhum inteiro-lixo gigante (do pontilhado) sobrou como valor
+check(!ocrNoise.results.some(r=>r.value_numeric>1000000), 'OCR: nenhum inteiro-lixo virou valor (veio '+ocrNoise.results.map(r=>r.value_numeric).filter(v=>v>1000000).join(',')+')');
+
 console.log(`\n== RESULTADO: ${passes} ok, ${fails} falhas ==`);
 process.exit(fails>0 ? 1 : 0);

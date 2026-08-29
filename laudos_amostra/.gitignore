@@ -1,0 +1,5 @@
+# Artefatos de trabalho (render/OCR) e laudos REAIS com dados de paciente (PII).
+# Nunca versionar: só culturas.md (amostra anonimizada) entra no repo.
+*
+!.gitignore
+!culturas.md

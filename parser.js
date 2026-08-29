@@ -11,6 +11,20 @@
   function stripAccents(s){ return (s||'').normalize('NFD').replace(/[̀-ͯ]/g,''); }
   function norm(s){ return stripAccents(String(s||'').toLowerCase()); }
 
+  // Limpa o "pontilhado" (leaders "..........:") que o OCR transforma em INTEIRO-LIXO grudado
+  // no rótulo/valor (ex.: "HEMÁCIAS...ci221022022..1 3,95" ou "PLAQUETAS. ...12220020222..1 216.900").
+  // Só age em token com >=2 pontos SEGUIDOS (número BR de milhar tem ponto único, nunca "..") →
+  // seguro p/ laudo limpo. NOME+pontilhado vira "NOME:"; pontilhado-lixo solto é removido.
+  function cleanLeaders(line){
+    return line.split(/(\s+)/).map(function(tok){
+      if(tok.indexOf('..') < 0) return tok;                          // sem pontilhado duplo → intacto (preserva 216.900)
+      var m = tok.match(/^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ]+)\.{2,}(.*)$/);    // NOME grudado no pontilhado
+      if(m) return m[2].charAt(0)===':' ? m[1]+m[2] : m[1]+':';      // "COLETA...:19/08"→"COLETA:19/08" ; "HEMÁCIAS...ci22..1"→"HEMÁCIAS:"
+      if(/^\.{2,}[.\dA-Za-zÀ-ÿ]*$/.test(tok)) return '';             // pontilhado-lixo que COMEÇA com pontos → some (não apaga nome grudado tipo HCO3...)
+      return tok;
+    }).join('');
+  }
+
   // Número no padrão BR: vírgula decimal, ponto de milhar.
   function parseNumBR(s){
     if(s==null) return null;
@@ -174,10 +188,18 @@
     if(mdiff){
       return {value_type:'numeric', value_numeric: parseNumBR(mdiff[1]), value_text: mdiff[1], unit:'/mm3', reference: reference};
     }
-    // numérico
-    var mn = valuePart.match(/-?\d{1,3}(?:\.\d{3})+(?:,\d+)?|-?\d+,\d+|-?\d+\.\d+|-?\d+/);
-    if(mn){
-      return {value_type:'numeric', value_numeric: parseNumBR(mn[0]), value_text: mn[0],
+    // numérico. Em laudo LIMPO o valor é o 1º número; em texto de OCR o pontilhado
+    // ("HEMÁCIAS...ci221022022..1 3,95 milhões/mm³") injeta um inteiro-lixo ANTES do valor.
+    // Sinal robusto: o valor real é o número colado numa UNIDADE (3,95 milhões/mm³ / 22,8 mmol/L);
+    // o lixo do pontilhado não tem unidade em seguida. Preferimos o 1º número seguido de unidade;
+    // se nenhum tiver unidade (ex.: INR), caímos no 1º número (comportamento antigo).
+    var numRe = /-?\d{1,3}(?:\.\d{3})+(?:,\d+)?|-?\d+,\d+|-?\d+\.\d+|-?\d+/g, nm, nums = [];
+    while((nm = numRe.exec(valuePart)) !== null){ nums.push({t: nm[0], end: nm.index + nm[0].length}); }
+    if(nums.length){
+      var picked = null;
+      for(var qi=0; qi<nums.length; qi++){ if(startsWithUnit(valuePart.slice(nums[qi].end))){ picked = nums[qi]; break; } }
+      if(!picked) picked = nums[0];
+      return {value_type:'numeric', value_numeric: parseNumBR(picked.t), value_text: picked.t,
               unit: findUnit(valuePart), reference: reference};
     }
     // qualitativo (só se não houver número)
@@ -194,6 +216,14 @@
     ln = ln.replace(/\s+/g,'');
     for(var i=0;i<UNITS.length;i++){ if(ln.indexOf(UNITS[i].replace(/\s+/g,''))>=0) return UNITS[i]; }
     return null;
+  }
+
+  // O trecho logo DEPOIS de um número começa com uma unidade? (usado p/ escolher o valor certo
+  // entre vários números na linha — o valor real cola numa unidade; o lixo do pontilhado não.)
+  function startsWithUnit(tail){
+    var t = norm(tail).replace(/³/g,'3').replace(/²/g,'2').replace(/[µμ]/g,'u').replace(/\s+/g,'');
+    for(var i=0;i<UNITS.length;i++){ if(t.indexOf(UNITS[i].replace(/\s+/g,''))===0) return true; }
+    return false;
   }
 
   // Exame FORA do catálogo (atípico): linha "Rótulo: valor [unidade]" que não é ruído nem
@@ -336,7 +366,7 @@
 
   /* ---------- pipeline principal ---------- */
   function parseLabText(text){
-    var lines = String(text||'').split(/\r?\n/).map(function(s){return s.replace(/\s+/g,' ').trim();}).filter(Boolean);
+    var lines = String(text||'').split(/\r?\n/).map(function(s){return cleanLeaders(s.replace(/\s+/g,' ').trim());}).filter(Boolean);
     var results = [];
     var current = null; // {result, hasValue}
     var docDate = detectDate(text);   // data do documento (fallback)

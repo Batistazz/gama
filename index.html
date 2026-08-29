@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Gama</title>
+<link rel="icon" href="data:,">
+
 <style>
   :root{
     --bg:#eef2f4; --panel:#ffffff; --line:#d6dee2; --line2:#e8eef0;
@@ -235,8 +237,8 @@ Valor de referência . 13,0 - 17,0
 CREATININA
 Resultado: 1,7 mg/dL
 Potássio: 5,2 mEq/L"></textarea>
-        <div class="drop noprint" id="drop" style="margin-top:8px">…ou arraste um <b>PDF</b> do laudo aqui (extrai o texto e usa o mesmo processador)</div>
-        <input type="file" id="filePdf" accept="application/pdf" hidden>
+        <div class="drop noprint" id="drop" style="margin-top:8px">…ou arraste o <b>PDF</b> do laudo ou uma <b>foto</b> (JPG/PNG) aqui. Laudo escaneado/foto é lido por <b>OCR</b> no próprio navegador (offline, nada sai do aparelho) — <b>confira o texto</b>, o OCR pode errar.</div>
+        <input type="file" id="filePdf" accept="application/pdf,image/*" hidden>
         <div style="margin-top:10px"><button class="btn primary" id="btnProcess">Processar</button></div>
         <div id="importMsg" style="margin-top:10px"></div>
       </div>
@@ -253,6 +255,7 @@ Potássio: 5,2 mEq/L"></textarea>
 <div class="modal-bg" id="modalBg"><div class="modal" id="modal"></div></div>
 
 <script src="vendor/pdf.min.js"></script>
+<script src="vendor/tesseract/tesseract.min.js"></script>
 <script src="parser.js"></script>
 <script>
 'use strict';
@@ -705,26 +708,86 @@ function commitResults(results,useISO){
 }
 function msgImport(kind,html){ document.getElementById('importMsg').innerHTML=`<div class="banner ${kind}">${html}</div>`; }
 
-/* PDF drop → extrai texto → mesmo pipeline */
+/* Import de laudo → texto → mesmo pipeline (Processar).
+   PDF com camada de texto: extrai direto. PDF-imagem (scan) ou FOTO: cai no OCR offline
+   (Tesseract.js em WebAssembly, roda no navegador — nenhum dado sai do aparelho). */
 const drop=document.getElementById('drop'), filePdf=document.getElementById('filePdf');
 drop.onclick=()=>filePdf.click();
-filePdf.onchange=e=>{ if(e.target.files[0])lerPDF(e.target.files[0]); };
+filePdf.onchange=e=>{ if(e.target.files[0])lerArquivo(e.target.files[0]); filePdf.value=''; };
 ['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
 ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
-drop.addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f&&f.type==='application/pdf')lerPDF(f); });
+drop.addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f)lerArquivo(f); });
+
+function lerArquivo(file){
+  if(file.type==='application/pdf' || /\.pdf$/i.test(file.name)) return lerPDF(file);
+  if(/^image\//.test(file.type) || /\.(png|jpe?g|webp|bmp|gif)$/i.test(file.name)) return lerImagem(file);
+  msgImport('warn','Formato não suportado. Use o <b>PDF</b> do laudo ou uma <b>foto</b> (JPG/PNG).');
+}
+
+/* ---- OCR offline (Tesseract.js). Worker criado sob demanda e reutilizado; PT-BR "fast". ---- */
+let _ocrWorker=null, _ocrCtx='';
+async function getOcrWorker(){
+  if(_ocrWorker) return _ocrWorker;
+  if(!window.Tesseract) throw new Error('OCR não carregou (vendor/tesseract).');
+  msgImport('ok','Preparando OCR (só na 1ª vez)…');
+  _ocrWorker = await Tesseract.createWorker('por', 1, {
+    workerPath:'vendor/tesseract/worker.min.js',
+    corePath:'vendor/tesseract/',
+    langPath:'vendor/tesseract/',
+    logger:m=>{
+      const pct=Math.round((m.progress||0)*100);
+      if(m.status==='recognizing text') msgImport('ok', _ocrCtx+' — <b>'+pct+'%</b>');
+      else if(/load|initiali/i.test(m.status)) msgImport('ok','Preparando OCR (só na 1ª vez)… '+escapeHtml(m.status)+' '+pct+'%');
+    }
+  });
+  return _ocrWorker;
+}
+async function ocrCanvas(canvas){ const w=await getOcrWorker(); const {data}=await w.recognize(canvas); return data.text||''; }
+async function pageToCanvas(page, targetW){
+  const base=page.getViewport({scale:1});
+  const scale=Math.min(4, Math.max(1.5, targetW/base.width));
+  const vp=page.getViewport({scale});
+  const c=document.createElement('canvas'); c.width=Math.ceil(vp.width); c.height=Math.ceil(vp.height);
+  await page.render({canvasContext:c.getContext('2d'), viewport:vp}).promise;
+  return c;
+}
+
 async function lerPDF(file){
   if(!window.pdfjsLib){ msgImport('warn','Leitor de PDF não carregou.'); return; }
   msgImport('ok','Lendo PDF…');
   try{
     const buf=await file.arrayBuffer(); const pdf=await pdfjsLib.getDocument({data:buf}).promise;
-    let linhas=[];
-    for(let i=1;i<=pdf.numPages;i++){ const pg=await pdf.getPage(i); const tc=await pg.getTextContent();
+    let linhas=[], ocrPages=0;
+    for(let i=1;i<=pdf.numPages;i++){
+      const pg=await pdf.getPage(i); const tc=await pg.getTextContent();
       const byY={}; tc.items.forEach(it=>{const y=Math.round(it.transform[5]);(byY[y]=byY[y]||[]).push({x:it.transform[4],s:it.str});});
-      Object.keys(byY).sort((a,b)=>b-a).forEach(y=>linhas.push(byY[y].sort((a,b)=>a.x-b.x).map(p=>p.s).join(' ')));
+      const pageLines=[]; Object.keys(byY).sort((a,b)=>b-a).forEach(y=>pageLines.push(byY[y].sort((a,b)=>a.x-b.x).map(p=>p.s).join(' ')));
+      if(pageLines.join('').replace(/\s/g,'').length>=20){ linhas.push(...pageLines); }   // tem camada de texto
+      else{                                                                                 // página-imagem → OCR
+        ocrPages++; _ocrCtx='Lendo por OCR — página '+i+'/'+pdf.numPages;
+        const txt=await ocrCanvas(await pageToCanvas(pg, 2200));
+        linhas.push(...txt.split(/\r?\n/));
+      }
     }
     document.getElementById('pasteArea').value=linhas.join('\n');
-    msgImport('ok','Texto extraído do PDF. Confira e clique <b>Processar</b>.');
-  }catch(e){ msgImport('warn','Falha ao ler o PDF: '+e.message); }
+    if(ocrPages) msgImport('warn','Li <b>'+ocrPages+'</b> página(s)-imagem por <b>OCR</b>. ⚠️ OCR erra número/unidade — <b>confira o texto acima</b> e clique <b>Processar</b>.');
+    else msgImport('ok','Texto extraído do PDF. Confira e clique <b>Processar</b>.');
+  }catch(e){ msgImport('warn','Falha ao ler o PDF: '+escapeHtml(e.message)); }
+}
+
+async function lerImagem(file){
+  if(!window.Tesseract){ msgImport('warn','OCR não carregou (vendor/tesseract).'); return; }
+  msgImport('ok','Lendo foto por OCR…'); _ocrCtx='Lendo foto por OCR';
+  try{
+    const url=URL.createObjectURL(file);
+    const img=await new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=()=>rej(new Error('imagem inválida')); im.src=url; });
+    const scale=Math.min(3, Math.max(1, 2200/img.naturalWidth));
+    const c=document.createElement('canvas'); c.width=Math.round(img.naturalWidth*scale); c.height=Math.round(img.naturalHeight*scale);
+    c.getContext('2d').drawImage(img,0,0,c.width,c.height); URL.revokeObjectURL(url);
+    const txt=await ocrCanvas(c);
+    document.getElementById('pasteArea').value=txt;
+    msgImport('warn','Foto lida por <b>OCR</b>. ⚠️ OCR erra número/unidade — <b>confira o texto acima</b> e clique <b>Processar</b>.');
+  }catch(e){ msgImport('warn','Falha no OCR da foto: '+escapeHtml(e.message)); }
 }
 
 /* ===================== Alterações ===================== */
