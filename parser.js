@@ -128,7 +128,7 @@
   });
   ALIAS_INDEX.sort(function(a,b){ return b.alias.length - a.alias.length; }); // mais longo primeiro
 
-  var UNITS = ['mg/dl','g/dl','meq/l','mmol/l','ng/ml','u/l','mm/h','mmhg','/mm3','mil/mm3','10^3/ul','x10^3/ul','x10^6/ul','fl','pg','mg/l','%','s'];
+  var UNITS = ['mg/dl','g/dl','meq/l','mmol/l','ng/ml','u/l','mm/h','mmhg','/mm3','mil/mm3','10^3/ul','x10^3/ul','x10^6/ul','fl','pg','mg/l','%'];
 
   function catByKey(k){ return CATALOG.find(function(c){return c.key===k;}); }
   function escRe(s){ return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); }
@@ -203,7 +203,7 @@
       for(var qi=0; qi<nums.length; qi++){ if(startsWithUnit(valuePart.slice(nums[qi].end))){ picked = nums[qi]; break; } }
       if(!picked) picked = nums[0];
       return {value_type:'numeric', value_numeric: parseNumBR(picked.t), value_text: picked.t,
-              unit: findUnit(valuePart), reference: reference};
+              unit: unitAtStart(valuePart.slice(picked.end)) || findUnit(valuePart), reference: reference};
     }
     // qualitativo (só se não houver número)
     for(var i=0;i<QUALITATIVOS.length;i++){
@@ -214,19 +214,38 @@
   }
 
   function findUnit(l){
-    var ln = norm(l).replace(/³/g,'3').replace(/²/g,'2').replace(/[µμ]/g,'u');
-    var d = ln.search(/\d/); if(d>0) ln = ln.slice(d);   // ignora o NOME do exame (antes do 1º número) → não pega o "s" de "plaquetas"
-    ln = ln.replace(/\s+/g,'');
+    var raw = norm(l).replace(/³/g,'3').replace(/²/g,'2').replace(/[µμ]/g,'u');
+    var d = raw.search(/\d/); if(d>0) raw = raw.slice(d);   // ignora o NOME do exame (antes do 1º número)
+    // O Tesseract costuma trocar o sobrescrito ³ por ?, º ou °. Esse padrão é
+    // específico de contagem celular e pode ser normalizado sem adivinhar dimensão.
+    var ln = raw.replace(/\s+/g,'');
+    if(/(?:milhoes?|milhao)\/mm[?º°3]/.test(ln)) return 'mil/mm3';
+    if(/\/mm[?º°3]/.test(ln)) return '/mm3';
     for(var i=0;i<UNITS.length;i++){ if(ln.indexOf(UNITS[i].replace(/\s+/g,''))>=0) return UNITS[i]; }
+    // Segundos só contam como token isolado; nunca como a letra "s" dentro de outra palavra.
+    if(/\bs\b/.test(raw)) return 's';
+    return null;
+  }
+
+  // Unidade imediatamente colada ao número escolhido. Evita usar, por exemplo,
+  // o /mm3 de uma coluna absoluta quando o número selecionado pertence à coluna %.
+  function unitAtStart(tail){
+    var raw = norm(tail).replace(/³/g,'3').replace(/²/g,'2').replace(/[µμ]/g,'u').trim();
+    var t = raw.replace(/\s+/g,'');
+    if(/^(?:milhoes?|milhao)\/mm[?º°3]/.test(t)) return 'mil/mm3';
+    if(/^\/mm[?º°3]/.test(t)) return '/mm3';
+    for(var i=0;i<UNITS.length;i++){
+      var u=UNITS[i].replace(/\s+/g,'');
+      if(t.indexOf(u)===0) return UNITS[i];
+    }
+    if(/^s(?:\b|$)/.test(raw)) return 's';
     return null;
   }
 
   // O trecho logo DEPOIS de um número começa com uma unidade? (usado p/ escolher o valor certo
   // entre vários números na linha — o valor real cola numa unidade; o lixo do pontilhado não.)
   function startsWithUnit(tail){
-    var t = norm(tail).replace(/³/g,'3').replace(/²/g,'2').replace(/[µμ]/g,'u').replace(/\s+/g,'');
-    for(var i=0;i<UNITS.length;i++){ if(t.indexOf(UNITS[i].replace(/\s+/g,''))===0) return true; }
-    return false;
+    return !!unitAtStart(tail);
   }
 
   // Exame FORA do catálogo (atípico): linha "Rótulo: valor [unidade]" que não é ruído nem
@@ -402,6 +421,12 @@
         if(current && current.result){
           var mr = l.match(/(-?\d[\d.]*(?:,\d+)?)\s*(?:[-a–]|at[eé])\s*(-?\d[\d.]*(?:,\d+)?)/);
           if(mr){ current.result.reference_min = parseNumBR(mr[1]); current.result.reference_max = parseNumBR(mr[2]); }
+          // Alguns laudos imprimem a unidade apenas na faixa de referência. Como a
+          // linha é explicitamente a referência do exame corrente, essa herança é segura.
+          if(current.hasValue && !current.result.unit){
+            var referenceUnit=findUnit(l);
+            if(referenceUnit){ current.result.unit=referenceUnit; finalizeConfidence(current.result); }
+          }
         }
         continue;
       }
@@ -471,7 +496,8 @@
   /* ---------- triagem conservadora para importação automática ----------
      Erra por omissão: qualquer dúvida bloqueia a linha, mas ainda informa o que foi identificado. */
   function unitToken(unit){
-    return norm(unit).replace(/³/g,'3').replace(/²/g,'2').replace(/[µμ]/g,'u').replace(/\s+/g,'');
+    return norm(unit).replace(/³/g,'3').replace(/²/g,'2').replace(/[µμ]/g,'u').replace(/\s+/g,'')
+      .replace(/milh(?:oes|ao)\/mm3/,'mil/mm3');
   }
   function unitsCompatible(actual, expected){
     return !!actual && !!expected && unitToken(actual)===unitToken(expected);

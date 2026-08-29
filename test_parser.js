@@ -405,6 +405,21 @@ RESULTADO......: 109,37 mg/dL`);
 check(convertedPcr.accepted.length===1 && convertedPcr.accepted[0].value_numeric===1093.7 && convertedPcr.accepted[0].unit==='mg/L', 'PCR em mg/dL é convertida para mg/L no quadro');
 
 check(P.unitsCompatible('/mm³','/mm3') && P.unitsCompatible('mEq/L','meq/l') && !P.unitsCompatible('mg/dL','mg/L'), 'normalização de unidade é estrita mas tolera grafia equivalente');
+check(P.unitsCompatible('mil/mm3','milhões/mm³'), 'unidade de hemácias abreviada equivale à unidade extensa');
+const ocrCountUnit=P.triageConservative(`DATA DA COLETA: 25/08/2026
+PLAQUETAS........: 216.900 /mm?`);
+check(ocrCountUnit.accepted.length===1 && ocrCountUnit.accepted[0].unit==='/mm3', 'OCR de sobrescrito em /mm? é normalizado contextualmente');
+const unitFromReference=P.triageConservative(`PLAQUETAS
+DATA DA COLETA: 25/08/2026
+RESULTADO: 216.900
+VALOR DE REFERÊNCIA: 150.000 a 450.000 /mm3`);
+check(unitFromReference.accepted.length===1 && unitFromReference.accepted[0].unit==='/mm3', 'unidade ausente no resultado é herdada da referência imediata');
+const wrongCountDimension=P.triageConservative(`DATA DA COLETA: 25/08/2026
+SÓDIO: 138 /mm?`);
+check(wrongCountDimension.accepted.length===0 && wrongCountDimension.blocked.some(r=>r.reasons.includes('unidade incompatível')), 'unidade celular corrompida não libera analito de dimensão incompatível');
+const ocrBandColumns=P.triageConservative(`DATA DA COLETA: 25/08/2026
+NEUTRÓFILOS BASTONETES.: 0,0 8% O /mm? Até 1.000 céls/mm?`);
+check(ocrBandColumns.accepted.length===0 && ocrBandColumns.blocked.some(r=>r.key==='bastoes'&&r.reasons.includes('unidade incompatível')), 'unidade da coluna absoluta não é aplicada ao número percentual de bastões');
 check(P.documentNotices('BIÓPSIA — anatomopatológico').some(n=>n.code==='pathology'), 'anatomopatológico é identificado como manual');
 check(P.documentNotices('GASOMETRIA ARTERIAL').some(n=>n.code==='other_lab'), 'exame laboratorial fora do quadro é apenas informado');
 
