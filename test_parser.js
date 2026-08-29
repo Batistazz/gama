@@ -420,6 +420,52 @@ check(wrongCountDimension.accepted.length===0 && wrongCountDimension.blocked.som
 const ocrBandColumns=P.triageConservative(`DATA DA COLETA: 25/08/2026
 NEUTRÓFILOS BASTONETES.: 0,0 8% O /mm? Até 1.000 céls/mm?`);
 check(ocrBandColumns.accepted.length===0 && ocrBandColumns.blocked.some(r=>r.key==='bastoes'&&r.reasons.includes('unidade incompatível')), 'unidade da coluna absoluta não é aplicada ao número percentual de bastões');
+
+// Perfil KN/Controllab: a coluna de referência nunca pode fornecer o resultado.
+console.log('== perfil Controllab: coluna de resultado isolada ==');
+const controllabOcr=P.triageConservative(`Controllab
+HEMOGRAMA COMPLETO
+DATA DA COLETA: 21/08/2026
+HEMOCLOBINA............: 13,7 g/dL              13,0 a 18,0 g/dL
+HEMATÓCRITO............: 43,9 &         38,0 a 52,0 &
+NEUTRÓFILOS BASTONETES.: 10,0 $ 3444 /mm?    Até 1.000 céls/mm'
+PLAQUETAS..............: 306.400 /mm'          140.000 a 450.000 /mm?
+SÓDIO
+RESULTADO..............: 144,8 mEqg/L
+VALOR DE REFERÊNCIA....: De 136 a 145 mEg/L`);
+const ct={}; controllabOcr.accepted.forEach(r=>ct[r.exam_name_normalized]=r);
+check(ct.hemoglobina&&ct.hemoglobina.value_numeric===13.7, 'OCR Controllab: HEMOCLOBINA é hemoglobina 13,7');
+check(ct.hematocrito&&ct.hematocrito.value_numeric===43.9&&ct.hematocrito.unit==='%', 'OCR Controllab: & é % somente no hematócrito');
+check(ct.bastoes&&ct.bastoes.value_numeric===3444&&ct.bastoes.unit==='/mm3', 'OCR Controllab: bastões usa contagem absoluta');
+check(ct.plaquetas&&ct.plaquetas.value_numeric===306400, 'OCR Controllab: plaquetas usa resultado 306.400, nunca referência 450.000');
+check(ct.sodio&&ct.sodio.value_numeric===144.8&&ct.sodio.unit==='meq/l', 'OCR Controllab: mEqg/L é normalizado estritamente');
+
+const fusedHct=P.triageConservative(`Controllab
+HEMOGRAMA COMPLETO
+DATA DA COLETA: 16/08/2026
+HEMATÓCRITO............: 37,78          38,0 a 52,0 &
+NEUTRÓFILOS BASTONETES.: 0,0 %      O /mmº    Até 1.000 céls/mmº`);
+const fh={}; fusedHct.accepted.forEach(r=>fh[r.exam_name_normalized]=r);
+check(fh.hematocrito&&fh.hematocrito.value_numeric===37.7&&fh.hematocrito.ocr_correction, 'OCR Controllab: 37,78 sem unidade recupera 37,7 % com rastreio');
+check(fh.bastoes&&fh.bastoes.value_numeric===0&&fh.bastoes.unit==='/mm3', 'OCR Controllab: O /mmº recupera bastões absolutos 0');
+
+const missingTableResult=P.triageConservative(`Controllab
+HEMOGRAMA COMPLETO
+DATA DA COLETA: 16/08/2026
+PLAQUETAS:          140.000 a 450.000 /mm?`);
+check(missingTableResult.accepted.length===0, 'Controllab: resultado ausente não importa número da referência');
+
+const duplicateSame=P.triageConservative(`DATA DA COLETA: 16/08/2026
+PLAQUETAS: 242.500 /mm3
+PLAQUETAS
+RESULTADO: 242.500
+VALOR DE REFERÊNCIA: 150.000 a 450.000 /mm3`);
+check(duplicateSame.accepted.length===1&&duplicateSame.accepted[0].value_numeric===242500, 'duplicata idêntica do mesmo dia é consolidada');
+const duplicateConflict=P.triageConservative(`DATA DA COLETA: 16/08/2026
+PLAQUETAS: 242.500 /mm3
+PLAQUETAS: 450.000 /mm3`);
+check(duplicateConflict.accepted.length===0&&duplicateConflict.blocked.some(r=>r.reasons.includes('resultados conflitantes para o mesmo exame e data')), 'duplicatas divergentes são todas bloqueadas');
+
 check(P.documentNotices('BIÓPSIA — anatomopatológico').some(n=>n.code==='pathology'), 'anatomopatológico é identificado como manual');
 check(P.documentNotices('GASOMETRIA ARTERIAL').some(n=>n.code==='other_lab'), 'exame laboratorial fora do quadro é apenas informado');
 

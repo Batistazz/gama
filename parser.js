@@ -41,7 +41,7 @@
      plaus = faixa fisiológica ampla; fora dela → 'warn' (provável erro de extração). */
   var CATALOG = [
     // Hemograma
-    {key:'hemoglobina',label:'Hemoglobina',grupo:'Hemograma',unit:'g/dL',dec:1,ref:[12,17],plaus:[2,25],aliases:['hemoglobina','hemoglob','hb','hgb']},
+    {key:'hemoglobina',label:'Hemoglobina',grupo:'Hemograma',unit:'g/dL',dec:1,ref:[12,17],plaus:[2,25],aliases:['hemoglobina','hemoclobina','hemoglob','hb','hgb']},
     {key:'hematocrito',label:'Hematócrito',grupo:'Hemograma',unit:'%',dec:1,ref:[36,52],plaus:[6,75],aliases:['hematocrito','ht','hct']},
     {key:'hemacias',label:'Hemácias',grupo:'Hemograma',unit:'milhões/mm³',dec:2,ref:[4.0,6.0],plaus:[1,8],aliases:['hemacias','eritrocitos','rbc']},
     {key:'vcm',label:'VCM',grupo:'Hemograma',unit:'fL',dec:1,ref:[80,100],plaus:[50,140],aliases:['vcm','mcv']},
@@ -167,7 +167,75 @@
   var QUALITATIVOS = ['nao reagente','não reagente','nao detectado','não detectado','indetectavel','indetectável','incontaveis','incontáveis','reagente','detectado','negativo','positivo','ausente','presente'];
 
   // Extrai valor de uma linha. Retorna {value_type,value_numeric,value_text,unit,reference} ou null.
-  function extractValue(l){
+  var CONTROLLAB_SINGLE_COLUMN = {
+    hemacias:1, hemoglobina:1, hematocrito:1, vcm:1, hcm:1, chcm:1, rdw:1,
+    leucocitos:1, plaquetas:1, vpm:1
+  };
+  var CONTROLLAB_DIFFERENTIAL = {
+    neutrofilos:1, bastoes:1, linfocitos:1, linfocitos_reativos:1, monocitos:1,
+    eosinofilos:1, basofilos:1, metamielocitos:1, mielocitos:1, promielocitos:1,
+    blastos:1, celulas_atipicas:1
+  };
+
+  // Extrai uma linha tabular do perfil KN/Controllab sem jamais procurar o valor
+  // dentro da coluna de referência. Esse é o fail-safe que impede, por exemplo,
+  // 450.000 (limite superior) de substituir o resultado real de plaquetas.
+  function extractControllabTableValue(valuePart, key){
+    if(CONTROLLAB_DIFFERENTIAL[key]){
+      var diff=valuePart.replace(/\b[Oo]\s*(?=\/?\s*mm[?'’*º°³3])/g,'0 ');
+      var md=diff.match(/^\s*(-?\d{1,3}(?:\.\d{3})*(?:,\d+)?|-?\d+(?:[.,]\d+)?)\s*(?:%|[&$])\s+(-?\d{1,3}(?:\.\d{3})*|-?\d+)\s*\/?\s*mm[?'’*º°³3]/i);
+      if(md){
+        return {value_type:'numeric',value_numeric:parseNumBR(md[2]),value_text:md[2],unit:'/mm3',reference:null,
+                ocr_correction:/\b[Oo]\s*(?=\/?\s*mm)/.test(valuePart)?'O → 0 em contagem absoluta':null};
+      }
+      // Diferencial ambíguo: devolve somente a primeira métrica e sua unidade.
+      // A triagem bloqueará porcentagem para analitos cuja dimensão esperada é /mm3.
+      var firstDiff=valuePart.match(/^\s*(-?\d{1,3}(?:\.\d{3})*(?:,\d+)?|-?\d+(?:[.,]\d+)?)\s*(%|[&$])/);
+      if(firstDiff){
+        return {value_type:'numeric',value_numeric:parseNumBR(firstDiff[1]),value_text:firstDiff[1],unit:'%',reference:null,
+                ocr_correction:firstDiff[2]==='%'?null:firstDiff[2]+' → %'};
+      }
+      return /\d/.test(valuePart)?{blocked_table_value:true}:null;
+    }
+    if(!CONTROLLAB_SINGLE_COLUMN[key]) return null;
+
+    // Três ou mais espaços são a divisória visual entre RESULTADO e REFERÊNCIA
+    // nesse modelo. Linha numérica sem essa divisória fica bloqueada (fail-closed).
+    var gap=valuePart.search(/\s{3,}/);
+    if(gap<0){
+      // Texto copiado costuma perder as lacunas da tabela. Ainda é seguro quando
+      // a unidade está colada ao PRIMEIRO número; nunca procuramos unidade adiante.
+      var leading=valuePart.match(/^\s*(-?\d{1,3}(?:\.\d{3})+(?:,\d+)?|-?\d+,\d+|-?\d+\.\d+|-?\d+)/);
+      if(!leading) return null;
+      var leadingTail=valuePart.slice(leading.index+leading[0].length);
+      var leadingUnit=unitAtStart(leadingTail,key==='hematocrito'||key==='chcm'||key==='rdw');
+      if(!leadingUnit) return {blocked_table_value:true};
+      var leadingRaw=leadingTail.trim();
+      return {value_type:'numeric',value_numeric:parseNumBR(leading[1]),value_text:leading[1],unit:leadingUnit,reference:null,
+              ocr_correction:/^[&$](?:\s|$)/.test(leadingRaw)?leadingRaw.charAt(0)+' → %':null};
+    }
+    var resultPart=valuePart.slice(0,gap).trim();
+    var referencePart=valuePart.slice(gap);
+    var mn=resultPart.match(/-?\d{1,3}(?:\.\d{3})+(?:,\d+)?|-?\d+,\d+|-?\d+\.\d+|-?\d+/);
+    if(!mn) return {blocked_table_value:true};
+    var unit=findUnit(resultPart, key==='hematocrito'||key==='chcm'||key==='rdw');
+    var valueText=mn[0], correction=null;
+
+    // Neste equipamento o hematócrito sai com uma casa decimal. Em uma ocorrência,
+    // o Tesseract fundiu o símbolo % ao número como um "8": 37,7% → 37,78.
+    // A correção só vale no perfil Controllab, só para hematócrito, só quando não há
+    // unidade na coluna de resultado e a coluna de referência é inequivocamente %.
+    if(key==='hematocrito' && !unit){
+      var fused=valueText.match(/^(-?\d{1,2}[.,]\d)8$/);
+      if(fused && /\d[\d.,]*\s+a\s+\d[\d.,]*\s*[&$%]/i.test(referencePart)){
+        valueText=fused[1]; unit='%'; correction='8 final → % no hematócrito Controllab';
+      }
+    }
+    return {value_type:'numeric',value_numeric:parseNumBR(valueText),value_text:valueText,unit:unit,reference:null,
+            ocr_correction:correction};
+  }
+
+  function extractValue(l, key, profile){
     var ln = norm(l);
     // referência inline entre parênteses/colchetes (guarda antes de tirar)
     var reference = null;
@@ -178,6 +246,14 @@
     var ci = valuePart.indexOf(':');
     if(ci>=0 && /\d/.test(valuePart.slice(ci+1))) valuePart = valuePart.slice(ci+1);   // valor vem DEPOIS do ":" (não pega o dígito do nome, ex.: PCO2/HCO3/TCO2)
     var vpn = norm(valuePart);
+
+    if(profile==='controllab' && key && (CONTROLLAB_SINGLE_COLUMN[key]||CONTROLLAB_DIFFERENTIAL[key])){
+      var tableValue=extractControllabTableValue(valuePart,key);
+      if(tableValue){
+        if(tableValue.blocked_table_value) return null;
+        return tableValue;
+      }
+    }
 
     // censurado (<0,1 / >100)
     var mc = valuePart.match(/([<>])\s*=?\s*(\d[\d.]*(?:,\d+)?)/);
@@ -213,14 +289,16 @@
     return null;
   }
 
-  function findUnit(l){
+  function findUnit(l, allowOcrPercent){
     var raw = norm(l).replace(/³/g,'3').replace(/²/g,'2').replace(/[µμ]/g,'u');
     var d = raw.search(/\d/); if(d>0) raw = raw.slice(d);   // ignora o NOME do exame (antes do 1º número)
     // O Tesseract costuma trocar o sobrescrito ³ por ?, º ou °. Esse padrão é
     // específico de contagem celular e pode ser normalizado sem adivinhar dimensão.
     var ln = raw.replace(/\s+/g,'');
-    if(/(?:milhoes?|milhao)\/mm[?º°3]/.test(ln)) return 'mil/mm3';
-    if(/\/mm[?º°3]/.test(ln)) return '/mm3';
+    if(/(?:milhoes?|milhao)\/mm[?'’*º°3]/.test(ln)) return 'mil/mm3';
+    if(/\/mm[?'’*º°3]/.test(ln)) return '/mm3';
+    if(/meqg\/l/.test(ln)||/meg\/l/.test(ln)) return 'meq/l';
+    if(allowOcrPercent && /(?:^|\s)[&$](?:\s|$)/.test(raw)) return '%';
     for(var i=0;i<UNITS.length;i++){ if(ln.indexOf(UNITS[i].replace(/\s+/g,''))>=0) return UNITS[i]; }
     // Segundos só contam como token isolado; nunca como a letra "s" dentro de outra palavra.
     if(/\bs\b/.test(raw)) return 's';
@@ -229,11 +307,14 @@
 
   // Unidade imediatamente colada ao número escolhido. Evita usar, por exemplo,
   // o /mm3 de uma coluna absoluta quando o número selecionado pertence à coluna %.
-  function unitAtStart(tail){
+  function unitAtStart(tail, allowOcrPercent){
     var raw = norm(tail).replace(/³/g,'3').replace(/²/g,'2').replace(/[µμ]/g,'u').trim();
     var t = raw.replace(/\s+/g,'');
-    if(/^(?:milhoes?|milhao)\/mm[?º°3]/.test(t)) return 'mil/mm3';
-    if(/^\/mm[?º°3]/.test(t)) return '/mm3';
+    if(/^(?:milhoes?|milhao)\/mm[?'’*º°3]/.test(t)) return 'mil/mm3';
+    if(/^(?:cels?|celulas?)\/mm[?'’*º°3]/.test(t)) return '/mm3';
+    if(/^\/mm[?'’*º°3]/.test(t)) return '/mm3';
+    if(/^meqg\/l/.test(t)||/^meg\/l/.test(t)) return 'meq/l';
+    if(allowOcrPercent && /^[&$](?:\s|$)/.test(raw)) return '%';
     for(var i=0;i<UNITS.length;i++){
       var u=UNITS[i].replace(/\s+/g,'');
       if(t.indexOf(u)===0) return UNITS[i];
@@ -244,8 +325,8 @@
 
   // O trecho logo DEPOIS de um número começa com uma unidade? (usado p/ escolher o valor certo
   // entre vários números na linha — o valor real cola numa unidade; o lixo do pontilhado não.)
-  function startsWithUnit(tail){
-    return !!unitAtStart(tail);
+  function startsWithUnit(tail, allowOcrPercent){
+    return !!unitAtStart(tail,allowOcrPercent);
   }
 
   // Exame FORA do catálogo (atípico): linha "Rótulo: valor [unidade]" que não é ruído nem
@@ -391,7 +472,11 @@
 
   /* ---------- pipeline principal ---------- */
   function parseLabText(text){
-    var lines = String(text||'').split(/\r?\n/).map(function(s){return cleanLeaders(s.replace(/\s+/g,' ').trim());}).filter(Boolean);
+    var rawText=String(text||'');
+    var profile=/controllab/.test(norm(rawText))&&/hemograma completo/.test(norm(rawText))?'controllab':null;
+    var lines = rawText.split(/\r?\n/).map(function(s){
+      return {raw:cleanLeaders(s.replace(/\t/g,'    ').trim()),compact:cleanLeaders(s.replace(/\s+/g,' ').trim())};
+    }).filter(function(x){return !!x.compact;});
     var results = [];
     var current = null; // {result, hasValue}
     var docDate = detectDate(text);   // data do documento (fallback)
@@ -411,7 +496,7 @@
     }
 
     for(var i=0;i<lines.length;i++){
-      var l = lines[i], ln = norm(l);
+      var l = lines[i].compact, rawLine=lines[i].raw, ln = norm(l);
 
       // atualiza a data de coleta corrente (cada página do laudo tem a sua "COLETA: dd/mm/aaaa")
       var _cd = collectionDateOf(l); if(_cd){ curDate = _cd; if(current && !current.hasValue) current.result.collection_dateISO = _cd; }
@@ -432,7 +517,7 @@
       }
 
       var anchor = findAnchor(l);
-      var val = extractValue(l);
+      var val = extractValue(rawLine,anchor&&anchor.key,profile);
 
       if(anchor){
         var cat = catByKey(anchor.key);
@@ -490,6 +575,7 @@
       if(val.unit) r.unit = val.unit;
       if(!r.unit){ var c = catByKey(r.exam_name_normalized); if(c && c.unit) r.unit_expected = c.unit; }
       if(val.reference){ r.reference_min = val.reference[0]; r.reference_max = val.reference[1]; }
+      if(val.ocr_correction) r.ocr_correction = val.ocr_correction;
     }
   }
 
@@ -497,7 +583,9 @@
      Erra por omissão: qualquer dúvida bloqueia a linha, mas ainda informa o que foi identificado. */
   function unitToken(unit){
     return norm(unit).replace(/³/g,'3').replace(/²/g,'2').replace(/[µμ]/g,'u').replace(/\s+/g,'')
-      .replace(/milh(?:oes|ao)\/mm3/,'mil/mm3');
+      .replace(/milh(?:oes|ao)\/mm3/,'mil/mm3')
+      .replace(/^\/mm[?'’*º°]$/,'/mm3')
+      .replace(/^meqg\/l$/,'meq/l').replace(/^meg\/l$/,'meq/l');
   }
   function unitsCompatible(actual, expected){
     return !!actual && !!expected && unitToken(actual)===unitToken(expected);
@@ -545,6 +633,24 @@
         accepted.push(safe);
       }
     });
+    // Repetições idênticas do mesmo analito/data são comuns em pacotes com
+    // hemograma + coagulograma: mantém uma só. Se os valores divergirem,
+    // nenhum deles entra automaticamente.
+    var groups={};
+    accepted.forEach(function(r){
+      var id=r.exam_name_normalized+'|'+(r.collection_dateISO||'');
+      (groups[id]=groups[id]||[]).push(r);
+    });
+    var uniqueAccepted=[];
+    Object.keys(groups).forEach(function(id){
+      var group=groups[id], signatures={};
+      group.forEach(function(r){signatures[r.value_type+'|'+r.value_numeric+'|'+unitToken(r.unit)]=1;});
+      if(Object.keys(signatures).length===1){ uniqueAccepted.push(group[0]); return; }
+      group.forEach(function(r){
+        blocked.push({key:r.exam_name_normalized,label:r.exam_name_original,reasons:['resultados conflitantes para o mesmo exame e data'],source_text:r.source_text||'',culture_artifact:false});
+      });
+    });
+    accepted=uniqueAccepted;
     var notices=documentNotices(text);
     return {
       kind:(notices.length&&accepted.length)?'mixed':(notices.length?notices[0].code:'lab'),
