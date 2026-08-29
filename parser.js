@@ -239,6 +239,9 @@
     if(/^\s*[<>]?\s*=?\s*-?\d[\d.,]*\s*(?:a|at[eé]|[-–])\s+/i.test(m[2])) return null;   // valor é FAIXA (referência)
     var label = m[1].replace(/[\s._:–-]+$/,'').trim();
     if(!/[a-zà-ÿ]{3,}/i.test(label)) return null;
+    if(/[()]/.test(label)) return null;                       // rótulo com parêntese solto = ruído de OCR (ex.: "dA 2) e PRN")
+    // sublabels de faixa de referência / demografia NUNCA são exame (ex.: "Adultos", "Homens", "Cordão")
+    if(/^(adultos?|homens|mulheres|criancas?|crianca|recem[\s-]?nascidos?|lactentes?|adolescentes?|idosos?|gestantes?|neonatos?|prematuros?|cordao|meses|anos|dias|jejum)\b/.test(norm(label))) return null;
     var val = extractValue(m[2]);
     if(!val || (val.value_type!=='numeric' && val.value_type!=='less_than' && val.value_type!=='greater_than')) return null;
     // inteiro grande SEM unidade = nº de atendimento/registro/CPF (ou nome + nº), não exame

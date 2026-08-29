@@ -348,5 +348,16 @@ check(onv.hco3 && onv.hco3.value_numeric===22.8, 'OCR: HCO3 22,8 mmol/L pela uni
 // nenhum inteiro-lixo gigante (do pontilhado) sobrou como valor
 check(!ocrNoise.results.some(r=>r.value_numeric>1000000), 'OCR: nenhum inteiro-lixo virou valor (veio '+ocrNoise.results.map(r=>r.value_numeric).filter(v=>v>1000000).join(',')+')');
 
+// Rótulos-ruído de OCR / sublabels de referência NÃO podem virar exame (poluíam a grade).
+console.log('== rótulo-ruído de OCR não vira exame ==');
+const junk = P.parseLabText(`dA 2) e PRN: 8,84 FL
+Cordao: 2,0 mg/dL
+Adultos: 2.3 a 4.7 mg/dL
+Homens..........: 0.60 a 1.30 mg/dL
+Recem-nascidos..: 0.30 a 1.00 mg/dL
+Aldolase ............. 5,8 U/L`);
+check(!junk.results.some(r=>/prn|cordao|adultos|homens|recem/i.test(r.exam_name_normalized)), 'ruído/demografia não vira exame (veio '+junk.results.map(r=>r.exam_name_normalized).join(',')+')');
+check(junk.results.some(r=>r.exam_name_original==='Aldolase' && r.value_numeric===5.8), 'exame atípico legítimo (Aldolase 5,8) ainda entra');
+
 console.log(`\n== RESULTADO: ${passes} ok, ${fails} falhas ==`);
 process.exit(fails>0 ? 1 : 0);
