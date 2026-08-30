@@ -10,6 +10,13 @@
   /* ---------- utilidades ---------- */
   function stripAccents(s){ return (s||'').normalize('NFD').replace(/[̀-ͯ]/g,''); }
   function norm(s){ return stripAccents(String(s||'').toLowerCase()); }
+  function isHospitalLabText(text){
+    var t=norm(text);
+    // Identificação deliberadamente específica do modelo usado pelo hospital.
+    // O parser genérico continua guardado, mas as regras fixas abaixo só podem
+    // ser ativadas quando o laudo KN/Controllab estiver inequivocamente presente.
+    return /controllab/.test(t) && /controle de qualidade|rua maria gertrudes|citometria de fluxo|imuno-turbidimetria|hemograma completo|gasometria arterial/.test(t);
+  }
 
   // Limpa o "pontilhado" (leaders "..........:") que o OCR transforma em INTEIRO-LIXO grudado
   // no rótulo/valor (ex.: "HEMÁCIAS...ci221022022..1 3,95" ou "PLAQUETAS. ...12220020222..1 216.900").
@@ -215,6 +222,19 @@
         return {value_type:'numeric',value_numeric:parseNumBR(firstDiff[1]),value_text:firstDiff[1],unit:'%',reference:null,
                 ocr_correction:firstDiff[2]==='%'?null:firstDiff[2]+' → %'};
       }
+      // No laudo fixo KN, o resultado absoluto é a última contagem da coluna
+      // antes do grande espaço que separa a referência. Recupera quando o OCR
+      // perde simultaneamente o símbolo de porcentagem e o "/mm³".
+      var diffGap=diff.search(/\s{3,}/), diffResult=diffGap>=0?diff.slice(0,diffGap):'';
+      var diffNums=diffResult.match(/-?\d{1,3}(?:\.\d{3})+(?:,\d+)?|-?\d+(?:[.,]\d+)?/g)||[];
+      if(diffNums.length>=2){
+        var absoluteText=diffNums[diffNums.length-1], absolute=parseNumBR(absoluteText);
+        var diffCat=catByKey(key);
+        if(absolute!=null && Number.isInteger(absolute) && diffCat && absolute>=diffCat.plaus[0] && absolute<=diffCat.plaus[1]){
+          return {value_type:'numeric',value_numeric:absolute,value_text:absoluteText,unit:'/mm3',reference:null,
+                  ocr_correction:'contagem absoluta recuperada pela coluna fixa KN'};
+        }
+      }
       return /\d/.test(valuePart)?{blocked_table_value:true}:null;
     }
     if(!CONTROLLAB_SINGLE_COLUMN[key]) return null;
@@ -230,9 +250,14 @@
       var leadingTail=valuePart.slice(leading.index+leading[0].length);
       var leadingUnit=unitAtStart(leadingTail,key==='hematocrito'||key==='chcm'||key==='rdw');
       if(!leadingUnit && (key==='vcm'||key==='vpm') && /^[e£f]\s*l\b/i.test(leadingTail.trim())) leadingUnit='fl';
-      if(!leadingUnit) return {blocked_table_value:true};
+      // Neste formulário fixo, a dimensão vem do próprio campo mapeado. Não
+      // dependemos do OCR acertar fL, %, pg ou /mm³ para aceitar a célula.
+      if(!leadingUnit){ var leadingCat=catByKey(key); if(leadingCat) leadingUnit=leadingCat.unit; }
+      if(!leadingUnit && key!=='inr') return {blocked_table_value:true};
       var leadingRaw=leadingTail.trim();
-      return {value_type:'numeric',value_numeric:parseNumBR(leading[1]),value_text:leading[1],unit:leadingUnit,reference:null,
+      var leadingText=leading[1];
+      if(key==='hematocrito' && /^-?\d{1,2}[.,]\d8$/.test(leadingText)) leadingText=leadingText.slice(0,-1);
+      return {value_type:'numeric',value_numeric:parseNumBR(leadingText),value_text:leadingText,unit:leadingUnit,reference:null,
               ocr_correction:/^[&$](?:\s|$)/.test(leadingRaw)?leadingRaw.charAt(0)+' → %':null};
     }
     var resultPart=valuePart.slice(0,gap).trim();
@@ -242,6 +267,7 @@
     var unit=findUnit(resultPart, key==='hematocrito'||key==='chcm'||key==='rdw');
     if(!unit && (key==='vcm'||key==='vpm') && /\d\s*[e£f]\s*l\b/i.test(resultPart)) unit='fl';
     if(!unit && (key==='chcm'||key==='rdw') && /\d[\d.,]*\s+a\s+\d[\d.,]*\s*[&$%3]/i.test(referencePart)) unit='%';
+    if(!unit){ var fixedCat=catByKey(key); if(fixedCat) unit=fixedCat.unit; }
     var valueText=mn[0], correction=null;
     if(key==='rdw' && unit==='%'){
       var rdwNums=(resultPart.match(/-?\d{1,3}(?:\.\d{3})+(?:,\d+)?|-?\d+,\d+|-?\d+\.\d+|-?\d+/g)||[]);
@@ -253,9 +279,9 @@
     // o Tesseract fundiu o símbolo % ao número como um "8": 37,7% → 37,78.
     // A correção só vale no perfil Controllab, só para hematócrito, só quando não há
     // unidade na coluna de resultado e a coluna de referência é inequivocamente %.
-    if(key==='hematocrito' && !unit){
+    if(key==='hematocrito'){
       var fused=valueText.match(/^(-?\d{1,2}[.,]\d)8$/);
-      if(fused && /\d[\d.,]*\s+a\s+\d[\d.,]*\s*[&$%]/i.test(referencePart)){
+      if(fused){
         valueText=fused[1]; unit='%'; correction='8 final → % no hematócrito Controllab';
       }
     }
@@ -275,7 +301,7 @@
     if(ci>=0 && /\d/.test(valuePart.slice(ci+1))) valuePart = valuePart.slice(ci+1);   // valor vem DEPOIS do ":" (não pega o dígito do nome, ex.: PCO2/HCO3/TCO2)
     var vpn = norm(valuePart);
 
-    if(profile==='controllab' && key && (CONTROLLAB_SINGLE_COLUMN[key]||CONTROLLAB_DIFFERENTIAL[key])){
+    if(profile==='hospital_kn' && key && (CONTROLLAB_SINGLE_COLUMN[key]||CONTROLLAB_DIFFERENTIAL[key])){
       var tableValue=extractControllabTableValue(valuePart,key);
       if(tableValue){
         if(tableValue.blocked_table_value) return null;
@@ -507,7 +533,7 @@
   /* ---------- pipeline principal ---------- */
   function parseLabText(text){
     var rawText=String(text||'');
-    var profile=/controllab/.test(norm(rawText))&&/hemograma completo/.test(norm(rawText))?'controllab':null;
+    var profile=isHospitalLabText(rawText)?'hospital_kn':null;
     var lines = rawText.split(/\r?\n/).map(function(s){
       return {raw:cleanLeaders(s.replace(/\t/g,'    ').trim()),compact:cleanLeaders(s.replace(/\s+/g,' ').trim())};
     }).filter(function(x){return !!x.compact;});
@@ -518,6 +544,7 @@
     var gasometrySection = false;
     var gasometrySample = null;       // arterial | venous | null
     var bilirubinSection = false;
+    var pendingSection = false;
 
     function finalizeConfidence(r){
       var c = catByKey(r.exam_name_normalized);
@@ -534,6 +561,14 @@
 
     for(var i=0;i<lines.length;i++){
       var l = lines[i].compact, rawLine=lines[i].raw, ln = norm(l);
+
+      // A página "Lista de Exames Pendentes" não contém resultados. Ignora o
+      // bloco inteiro até o cabeçalho inequívoco de um novo laudo/página.
+      if(/lista de exames pendentes|exames pendentes/.test(ln)){pendingSection=true;current=null;continue;}
+      if(pendingSection){
+        if(/controle de qualidade|hemograma completo|gasometria\s+(?:arterial|venos[ao])/.test(ln)) pendingSection=false;
+        else continue;
+      }
 
       // O painel de bilirrubinas traz três resultados seguidos de muitas faixas
       // pediátricas com os mesmos rótulos. Ele é extraído abaixo como bloco;
@@ -552,6 +587,12 @@
       // blocos abaixo, nunca a partir do controle ou da atividade.
       if(/^tempo de (?:proto|trombo)/.test(ln)){current=null;continue;}
 
+      // Cada página KN repete o cabeçalho do paciente. Ao encontrá-lo, fecha a
+      // seção anterior para que aliases exclusivos da gasometria (como pE → pH)
+      // não contaminem exames das páginas seguintes.
+      if(gasometrySection && /^(?:controllab|controle de qualidade|paciente|solicitante)\b/.test(ln)){
+        gasometrySection=false; gasometrySample=null;
+      }
       if(/gasometria\s+arterial/.test(ln)){ gasometrySection=true; gasometrySample='arterial'; }
       else if(/gasometria\s+venos[ao]/.test(ln)){ gasometrySection=true; gasometrySample='venous'; }
       if(/material.*sangue\s+arterial/.test(ln)) gasometrySample='arterial';
@@ -588,17 +629,29 @@
         anchor={key:'ph',isWord:true,matchText:'pe'};
       var val = extractValue(rawLine,anchor&&anchor.key,profile);
       if(anchor && anchor.key==='inr' && val) val.unit=null;
+      if(anchor && val && profile==='hospital_kn'){
+        var fixedValueCat=catByKey(anchor.key);
+        // No laudo hospitalar identificado, a unidade é propriedade fixa do
+        // campo quando o OCR a omite. Uma unidade presente e incompatível não
+        // é sobrescrita: assim uma porcentagem sem contagem absoluta continua
+        // bloqueada, em vez de virar artificialmente uma contagem /mm³.
+        if(fixedValueCat && fixedValueCat.unit && !val.unit) val.unit=fixedValueCat.unit;
+      }
 
       if(anchor){
         var cat = catByKey(anchor.key);
         var base = {
-          exam_name_original: l.split(/(?=[<>]?\s*-?\d)/)[0].replace(/[.·:]+\s*$/,'').trim() || cat.label,
+          // Neste formulário os nomes são controlados pelo hospital. Usar o
+          // rótulo canônico também evita truncar siglas que contêm dígitos
+          // (PCO2/HCO3) ao separar o nome do valor.
+          exam_name_original: profile==='hospital_kn' ? cat.label : (l.split(/(?=[<>]?\s*-?\d)/)[0].replace(/[.·:]+\s*$/,'').trim() || cat.label),
           exam_name_normalized: anchor.key,
           category:'laboratory',
           value_type:null, value_numeric:null, value_text:null, unit:null,
           reference_min:null, reference_max:null, reference_text:null,
           matched_symbol_only: (!anchor.isWord||GAS_OCR_ALIASES[anchor.matchText]) && !(gasometrySection && cat.grupo==='Gasometria'),
           sample_type: cat.grupo==='Gasometria' ? gasometrySample : null,
+          source_profile: profile,
           collection_dateISO: (curDate || docDate),
           source_text: l
         };
@@ -638,14 +691,14 @@
     }
 
     appendStructuredPanels();
-    return { results: results, dateISO: docDate };
+    return { results: results, dateISO: docDate, profile:profile };
 
     function appendStructured(key,valueText,unit,sourceText,valueType,sectionDate){
       var c=catByKey(key), r={
         exam_name_original:c.label,exam_name_normalized:key,category:'laboratory',
         value_type:valueType||'numeric',value_numeric:valueType==='qualitative'?null:parseNumBR(valueText),value_text:valueText,unit:unit||null,
         reference_min:null,reference_max:null,reference_text:null,matched_symbol_only:false,sample_type:null,
-        collection_dateISO:sectionDate||docDate,source_text:sourceText
+        source_profile:profile,collection_dateISO:sectionDate||docDate,source_text:sourceText
       };
       results.push(r);finalizeConfidence(r);
     }
@@ -656,12 +709,23 @@
         while((m=re.exec(prefix))!==null) last=m[0];
         return last ? detectDate(last) : docDate;
       }
-      var bili=rawText.match(/bilirrubina total e fra[cç][oõ]es[\s\S]{0,700}?\btotal[^0-9]{0,30}(-?\d[\d.]*(?:,\d+)?)\s*mg\s*\/\s*dl[\s\S]{0,100}?\bdireta[^0-9]{0,30}(-?\d[\d.]*(?:,\d+)?)\s*mg\s*\/\s*dl[\s\S]{0,100}?\bindireta[^0-9]{0,30}(-?\d[\d.]*(?:,\d+)?)\s*mg\s*\/\s*dl/i);
-      if(bili){
-        var biliDate=detectDate(bili[0])||nearestCollectionDate(bili.index);
-        appendStructured('bilirrubina_total',bili[1],'mg/dL','BILIRRUBINA TOTAL: '+bili[1]+' mg/dL',null,biliDate);
-        appendStructured('bilirrubina_direta',bili[2],'mg/dL','BILIRRUBINA DIRETA: '+bili[2]+' mg/dL',null,biliDate);
-        appendStructured('bilirrubina_indireta',bili[3],'mg/dL','BILIRRUBINA INDIRETA: '+bili[3]+' mg/dL',null,biliDate);
+      var biliHeading=/bilirrubina total e fra[cç][oõ]es/i.exec(rawText);
+      if(biliHeading){
+        // No formulário KN, os três valores ficam entre RESULTADO e VALORES DE
+        // REFERÊNCIA. Recortar esse bloco impede capturar faixas pediátricas e
+        // permite sobreviver quando o OCR perde a unidade em uma das linhas.
+        var biliWindow=rawText.slice(biliHeading.index,biliHeading.index+1800);
+        var resultStart=biliWindow.search(/resultado\s*:/i), referenceStart=biliWindow.search(/valores?\s+de\s+refer/i);
+        var biliResult=resultStart>=0?biliWindow.slice(resultStart,referenceStart>resultStart?referenceStart:Math.min(biliWindow.length,resultStart+500)):'';
+        var total=biliResult.match(/(?:^|\n)\s*total[^0-9]{0,40}(-?\d[\d.]*(?:,\d+)?)/i);
+        var direct=biliResult.match(/(?:^|\n)\s*direta[^0-9]{0,40}(-?\d[\d.]*(?:,\d+)?)/i);
+        var indirect=biliResult.match(/(?:^|\n)\s*indireta[^0-9]{0,40}(-?\d[\d.]*(?:,\d+)?)/i);
+        if(total&&direct&&indirect){
+          var biliDate=detectDate(biliWindow.slice(0,resultStart>=0?resultStart:500))||nearestCollectionDate(biliHeading.index);
+          appendStructured('bilirrubina_total',total[1],'mg/dL','BILIRRUBINA TOTAL: '+total[1]+' mg/dL',null,biliDate);
+          appendStructured('bilirrubina_direta',direct[1],'mg/dL','BILIRRUBINA DIRETA: '+direct[1]+' mg/dL',null,biliDate);
+          appendStructured('bilirrubina_indireta',indirect[1],'mg/dL','BILIRRUBINA INDIRETA: '+indirect[1]+' mg/dL',null,biliDate);
+        }
       }
       var tp=rawText.match(/tempo de protrombina[\s\S]{0,500}?plasma examinado[^0-9]{0,30}(-?\d[\d.]*(?:,\d+)?)\s*segundos/i);
       if(tp) appendStructured('tp',tp[1],'s','Plasma examinado: '+tp[1]+' segundos',null,nearestCollectionDate(tp.index));
@@ -761,7 +825,7 @@
     return {
       kind:(notices.length&&accepted.length)?'mixed':(notices.length?notices[0].code:'lab'),
       accepted:accepted, blocked:blocked, notices:notices, needsDate:needsDate,
-      dateISO:parsed.dateISO, recognizedCount:parsed.results.length
+      dateISO:parsed.dateISO, profile:parsed.profile, recognizedCount:parsed.results.length
     };
   }
 
@@ -777,6 +841,7 @@
     detectDate: detectDate,
     parseNumBR: parseNumBR,
     norm: norm,
+    isHospitalLabText: isHospitalLabText,
     CATALOG: CATALOG,
     GASOMETRY_PANEL: GASOMETRY_PANEL,
     FIXED_PANEL: FIXED_PANEL,

@@ -245,7 +245,7 @@
     <div class="tabview" id="tab-import" style="display:none">
       <div class="card">
         <h2>Importar resultados</h2>
-        <p class="small muted">Escolha o <b>PDF do laboratório</b>. O Gama lê o arquivo, pega a data da coleta e coloca no quadro todos os exames laboratoriais reconhecidos. Culturas e exames ainda sem resultado são apenas informados.</p>
+        <p class="small muted">Escolha o <b>PDF KN/Controllab usado pelo hospital</b>. O Gama lê o arquivo, pega a data da coleta e coloca os resultados no quadro. Culturas e exames ainda sem resultado são apenas informados. Outros modelos ficam para uma etapa futura.</p>
         <textarea id="pasteArea" placeholder="Ex.:
 Hemoglobina ......... 10,8 g/dL
 Valor de referência . 13,0 - 17,0
@@ -272,7 +272,7 @@ Potássio: 5,2 mEq/L"></textarea>
 
 <script src="vendor/tesseract/tesseract.min.js"></script>
 <script src="vendor/pdf.min.js"></script>
-<script src="parser.js?v=20260829-3"></script>
+<script src="parser.js?v=20260830-1"></script>
 <script>
 'use strict';
 const P = window.Parser;
@@ -830,6 +830,10 @@ async function importarArquivo(file){
     }
     const text=lines.join('\n'); document.getElementById('pasteArea').value=text;
     if(!text.trim()){ msgImport('warn','Não consegui ler este PDF.'); return; }
+    if(!P.isHospitalLabText(text)){
+      msgImport('warn','Este PDF não corresponde ao modelo KN/Controllab do hospital. Por segurança, nenhum resultado foi colocado no quadro.');
+      return;
+    }
     if(ocrPages) msgImport('ok',`OCR concluído em ${ocrPages} página(s). Colocando os exames no quadro…`);
     doProcess(text);
   }catch(e){ const msg='Não foi possível ler este PDF: '+escapeHtml(e.message); msgImport('warn',msg); showToast(msg,'warn'); }

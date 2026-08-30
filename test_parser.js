@@ -466,6 +466,39 @@ check(fhov.vcm&&fhov.vcm.value_numeric===96.5&&P.unitsCompatible(fhov.vcm.unit,'
 check(fhov.chcm&&fhov.chcm.value_numeric===31.6&&fhov.chcm.unit==='%', 'OCR Controllab: CHCM em % entra no quadro');
 [['eosinofilos',0],['basofilos',0],['metamielocitos',505],['mielocitos',252],['promielocitos',0],['blastos',0],['celulas_atipicas',0]].forEach(([k,v])=>check(fhov[k]&&fhov[k].value_numeric===v,k+' com % corrompido pelo OCR preserva a contagem absoluta '+v));
 
+const hospitalFixed=P.triageConservative(`Controllab
+CONTROLE DE QUALIDADE
+HEMOGRAMA COMPLETO
+COLETA: 16/08/2026
+HEMATÓCRITO: 37,78          38,0 a 52,0
+VCM: 95,4                  80,0 a 100,0
+CHCM: 31,8                 31,0 a 36,0
+RDW: 15,3                  10,0 a 16,0
+NEUTRÓFILOS BASTONETES: 8,0 2018          Até 1.000
+CÉLULAS ATÍPICAS: 0,0 0                  0,0 a 0,0
+GASOMETRIA ARTERIAL
+PCOZ: 38,5
+$S02C: 91,2
+BILIRRUBINA TOTAL E FRAÇÕES
+DATA DA COLETA: 16/08/2026
+RESULTADO:
+TOTAL: 0,56
+DIRETA: 0,19
+INDIRETA: 0,37
+VALORES DE REFERÊNCIA:`);
+const hfixed={};hospitalFixed.accepted.forEach(r=>hfixed[r.exam_name_normalized]=r);
+check(P.isHospitalLabText('Controllab\nCONTROLE DE QUALIDADE\nGASOMETRIA ARTERIAL'),'perfil KN/Controllab do hospital é identificado');
+check(!P.isHospitalLabText('Outro laboratório\nHEMOGRAMA COMPLETO'),'outro laboratório não recebe regras fixas KN');
+[['hematocrito',37.7],['vcm',95.4],['chcm',31.8],['rdw',15.3],['bastoes',2018],['celulas_atipicas',0],['pco2',38.5],['sato2',91.2],['bilirrubina_total',0.56],['bilirrubina_direta',0.19],['bilirrubina_indireta',0.37]].forEach(([k,v])=>check(hfixed[k]&&hfixed[k].value_numeric===v,'perfil hospitalar fixo recupera '+k+' = '+v+' sem depender da unidade OCR (veio '+(hfixed[k]||{}).value_numeric+')'));
+check(['vcm','chcm','rdw','bastoes','celulas_atipicas','pco2','sato2','bilirrubina_total','bilirrubina_direta','bilirrubina_indireta'].every(k=>hfixed[k]&&hfixed[k].confidence==='ok'),'campos fixos hospitalares recuperados entram com confiança ok');
+
+const differentialPercentOnly=P.triageConservative(`Controllab
+CONTROLE DE QUALIDADE
+HEMOGRAMA COMPLETO
+COLETA: 16/08/2026
+NEUTRÓFILOS SEGMENTADOS: 75,0 %          1.500 a 7.500 /mm3`);
+check(!differentialPercentOnly.accepted.some(r=>r.exam_name_normalized==='neutrofilos'), 'diferencial sem contagem absoluta não converte porcentagem em /mm3');
+
 const missingTableResult=P.triageConservative(`Controllab
 HEMOGRAMA COMPLETO
 DATA DA COLETA: 16/08/2026
@@ -529,6 +562,18 @@ const gasAliasOutside=P.triageConservative(`DATA DA COLETA: 18/08/2026
 POZ: 87,0 mmiÃg`);
 check(gasAliasOutside.accepted.length===0&&gasAliasOutside.blocked.some(r=>r.key==='po2'), 'alias OCR POZ fora de seção de gasometria permanece bloqueado');
 
+const gasSectionReset=P.parseLabText(`Controllab
+GASOMETRIA ARTERIAL
+DATA DA COLETA: 18/08/2026
+pE: 7,440
+CONTROLE DE QUALIDADE
+PACIENTE: TESTE
+BIOQUÍMICA
+pE: 7,111`);
+const resetPh=gasSectionReset.results.filter(r=>r.exam_name_normalized==='ph');
+check(resetPh.length===1&&resetPh[0].value_numeric===7.44, 'alias pE → pH termina no cabeçalho da página seguinte');
+check(resetPh[0]&&resetPh[0].exam_name_original==='pH', 'perfil hospitalar armazena nome canônico de sigla com dígito');
+
 check(P.documentNotices('BIÓPSIA — anatomopatológico').some(n=>n.code==='pathology'), 'anatomopatológico é identificado como manual');
 check(!P.documentNotices('GASOMETRIA ARTERIAL').some(n=>n.code==='other_lab'), 'gasometria não é mais classificada fora do quadro');
 const pendingNotices=P.documentNotices('LISTA DE EXAMES PENDENTES\nEAS URINA TIPO 1\nGRAM, BACTERIOSCOPIA\nÁCIDO LÁTICO - LACTATO\nPREVISÃO DE ENTREGA 14/08/2026');
@@ -574,8 +619,11 @@ Object.keys(fixtureExpected).forEach(name=>{
   const report=P.triageConservative(text);
   check(report.accepted.length===fixtureExpected[name]&&!report.needsDate, name+' importa todos os exames conhecidos com data (veio '+report.accepted.length+': '+report.accepted.map(r=>r.exam_name_normalized).join(', ')+')');
 });
-const cultureFixture=P.triageConservative(fs.readFileSync(path.join(fixtureDir,'culturas.md'),'utf8'));
-check(cultureFixture.accepted.length===0&&cultureFixture.notices.some(n=>n.code==='culture'), 'fixture de culturas é somente manual');
+const cultureFixturePath=path.join(fixtureDir,'culturas.md');
+if(fs.existsSync(cultureFixturePath)){
+  const cultureFixture=P.triageConservative(fs.readFileSync(cultureFixturePath,'utf8'));
+  check(cultureFixture.accepted.length===0&&cultureFixture.notices.some(n=>n.code==='culture'), 'fixture de culturas é somente manual');
+}else console.log('  [local] culturas.md não disponível neste clone; validação confidencial ignorada');
 
 console.log(`\n== RESULTADO: ${passes} ok, ${fails} falhas ==`);
 process.exit(fails>0 ? 1 : 0);
