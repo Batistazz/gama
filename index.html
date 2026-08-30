@@ -704,9 +704,10 @@ function renderPrintHeader(){
 
 /* ===================== Importar ===================== */
 document.getElementById('btnProcess').onclick=()=>doProcess(document.getElementById('pasteArea').value);
-function conservativeMessage(report,added,skipped){
+function conservativeMessage(report,added,skipped,corrected){
   const parts=[];
   if(added)parts.push(`<b>${added} resultado(s) importado(s).</b>`);
+  if(corrected)parts.push(`${corrected} leitura(s) anterior(es) corrigida(s).`);
   if(skipped)parts.push(`${skipped} duplicado(s) ignorado(s).`);
   (report.notices||[]).forEach(n=>parts.push(escapeHtml(n.message)));
   const labels=[...new Set((report.blocked||[]).filter(x=>!x.culture_artifact&&!x.pending_artifact).map(x=>x.label).filter(Boolean))];
@@ -761,11 +762,16 @@ function commitCulture(cult,useISO){
   setTab('folhao');
 }
 function commitResults(results,useISO,report){
-  let ok=0,warn=0,skipped=0; const datas=new Set();
+  let ok=0,warn=0,skipped=0,corrected=0; const datas=new Set();
   const signature=o=>[
     o.encounter_id,o.exam_name_normalized,o.collection_datetime,o.sample_type||'',o.value_type,
     o.value_numeric==null?'':String(o.value_numeric),o.value_text||'',o.unit||''
   ].join('\u001f');
+  const sourceIdentity=o=>{
+    const source=P.norm(o.source_text||'').replace(/\s+/g,' ').trim();
+    if(!source)return null;
+    return [o.encounter_id,o.exam_name_normalized,dayKey(o.collection_datetime),o.sample_type||'',source].join('\u001f');
+  };
   const existing=new Set(DB.observations.filter(o=>o.encounter_id===curEnc.id).map(signature));
   results.forEach(r=>{
     const iso=r.collection_dateISO||useISO; datas.add(iso.slice(0,10));
@@ -774,10 +780,23 @@ function commitResults(results,useISO,report){
       value_type:r.value_type,value_numeric:r.value_numeric,value_text:r.value_text,unit:r.unit||(P.catByKey(r.exam_name_normalized)||{}).unit,
       reference_min:r.reference_min,reference_max:r.reference_max,reference_text:r.reference_text,
       collection_datetime:iso,sample_type:r.sample_type||null,source_type:'import',source_text:r.source_text,confidence:r.confidence,confidence_reason:r.confidence_reason,
-      ocr_correction:r.ocr_correction||null,
+      ocr_correction:r.ocr_correction||null,source_profile:r.source_profile||null,import_version:'20260830-2',
       created_at:new Date().toISOString()};
     const sig=signature(next);
-    if(existing.has(sig)){ skipped++; return; }
+    // Reprocessar o mesmo laudo deve corrigir a leitura anterior, não empilhar
+    // dois valores para a mesma linha-fonte. Resultados manuais nunca entram
+    // nesta substituição.
+    const sid=sourceIdentity(next);
+    const priorSameSource=sid?DB.observations.filter(o=>o.source_type==='import'&&sourceIdentity(o)===sid):[];
+    const alreadyExact=priorSameSource.some(o=>signature(o)===sig);
+    const outdated=priorSameSource.filter(o=>signature(o)!==sig);
+    if(outdated.length){
+      const oldSet=new Set(outdated);
+      outdated.forEach(o=>existing.delete(signature(o)));
+      DB.observations=DB.observations.filter(o=>!oldSet.has(o));
+      corrected++;
+    }
+    if(alreadyExact||existing.has(sig)){ skipped++; return; }
     existing.add(sig); DB.observations.push(next);
     if(r.confidence==='warn')warn++; else ok++;
   });
@@ -786,7 +805,7 @@ function commitResults(results,useISO,report){
   const dl=[...datas].sort();
   const quando = dl.length>1 ? (dl.length+' datas ('+dl.map(d=>d.slice(8,10)+'/'+d.slice(5,7)).join(', ')+')') : fmtDay(dl[0]||useISO);
   const added=ok+warn;
-  const msg=report?conservativeMessage(report,added,skipped):(added
+  const msg=report?conservativeMessage(report,added,skipped,corrected):(added
     ? `${added} resultado(s) adicionado(s) em ${quando}.${skipped?' '+skipped+' duplicado(s) ignorado(s).':''}`
     : `Nenhum resultado novo: ${skipped} duplicado(s) já estava(m) na grade.`);
   const hasManual=report&&((report.blocked||[]).length||(report.notices||[]).length);
