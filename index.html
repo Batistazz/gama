@@ -245,7 +245,7 @@
     <div class="tabview" id="tab-import" style="display:none">
       <div class="card">
         <h2>Importar resultados</h2>
-        <p class="small muted">Escolha o <b>PDF do laboratório</b>. O Gama lê o arquivo, pega a data da coleta e coloca no quadro os exames reconhecidos. Exames que não fazem parte do quadro são apenas informados.</p>
+        <p class="small muted">Escolha o <b>PDF do laboratório</b>. O Gama lê o arquivo, pega a data da coleta e coloca no quadro todos os exames laboratoriais reconhecidos. Culturas e exames ainda sem resultado são apenas informados.</p>
         <textarea id="pasteArea" placeholder="Ex.:
 Hemoglobina ......... 10,8 g/dL
 Valor de referência . 13,0 - 17,0
@@ -272,7 +272,7 @@ Potássio: 5,2 mEq/L"></textarea>
 
 <script src="vendor/tesseract/tesseract.min.js"></script>
 <script src="vendor/pdf.min.js"></script>
-<script src="parser.js?v=20260829-2"></script>
+<script src="parser.js?v=20260829-3"></script>
 <script>
 'use strict';
 const P = window.Parser;
@@ -281,7 +281,22 @@ if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker
 /* ===================== Persistência ===================== */
 const KEY='folhao_v2';
 let DB = load();
-function load(){ try{const d=JSON.parse(localStorage.getItem(KEY))||blank(); if(!d.events)d.events=[]; return d;}catch(e){return blank();} }
+function migrateStoredData(d){
+  let changed=false;
+  (d.observations||[]).forEach(o=>{
+    // Versões anteriores multiplicavam PCR em mg/dL por 10. Só desfazemos a
+    // conversão quando o próprio texto-fonte prova que o laudo dizia mg/dL.
+    if(o.exam_name_normalized==='pcr' && P.norm(o.unit)==='mg/l' && /mg\s*\/\s*dl/i.test(o.source_text||'') && typeof o.value_numeric==='number'){
+      o.value_numeric=o.value_numeric/10;
+      o.unit='mg/dL';
+      delete o.unit_conversion;
+      changed=true;
+    }
+  });
+  if(changed) localStorage.setItem(KEY,JSON.stringify(d));
+  return d;
+}
+function load(){ try{const d=JSON.parse(localStorage.getItem(KEY))||blank(); if(!d.events)d.events=[]; return migrateStoredData(d);}catch(e){return blank();} }
 function blank(){ return {patients:[],encounters:[],observations:[],events:[]}; }
 function save(){ localStorage.setItem(KEY, JSON.stringify(DB)); }
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
@@ -292,15 +307,22 @@ const fmtDay=iso=>{const s=String(iso||'');const m=s.match(/^(\d{4})-(\d{2})-(\d
 const fmtTime=iso=>new Date(iso).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
 function fmtNum(n,dec){ if(n==null||isNaN(n))return'—'; return n.toLocaleString('pt-BR',{minimumFractionDigits:dec||0,maximumFractionDigits:dec||0}); }
 function obsDisplay(o){
+  const sample=o.sample_type==='arterial'?'A·':(o.sample_type==='venous'?'V·':'');
   const c=P.catByKey(o.exam_name_normalized);
   if(!c){ // exame fora do catálogo: mostra o texto original do valor
-    return o.value_text||(o.value_numeric!=null?fmtNum(o.value_numeric,2):'—');
+    return sample+(o.value_text||(o.value_numeric!=null?fmtNum(o.value_numeric,2):'—'));
+  }
+  // Em importações, conserva a representação numérica validada do próprio
+  // laudo (145,9 não pode virar 146; 138,70 não pode perder casas decimais).
+  if(o.source_type==='import' && o.value_type==='numeric' && /^[+-]?(?:\d{1,3}(?:\.\d{3})+|\d+)(?:,\d+)?$/.test(String(o.value_text||'').trim())){
+    const sourceNumber=P.parseNumBR(o.value_text);
+    if(sourceNumber!=null && Math.abs(sourceNumber-o.value_numeric)<1e-9) return sample+String(o.value_text).trim();
   }
   const dec=c.dec;
-  if(o.value_type==='numeric') return fmtNum(o.value_numeric,dec);
-  if(o.value_type==='less_than') return '<'+fmtNum(o.value_numeric,dec);
-  if(o.value_type==='greater_than') return '>'+fmtNum(o.value_numeric,dec);
-  return escapeHtml(o.value_text||'—');
+  if(o.value_type==='numeric') return sample+fmtNum(o.value_numeric,dec);
+  if(o.value_type==='less_than') return sample+'&lt;'+fmtNum(o.value_numeric,dec);
+  if(o.value_type==='greater_than') return sample+'&gt;'+fmtNum(o.value_numeric,dec);
+  return sample+escapeHtml(o.value_text||'—');
 }
 // Metadados do exame: do catálogo, ou (se fora do catálogo) da própria observação → grupo "Outros"
 function examMeta(key){
@@ -435,6 +457,7 @@ function dayValues(examKey,obs){
 function abnormal(o){
   if(!o||o.value_type!=='numeric')return null;
   const c=P.catByKey(o.exam_name_normalized);
+  if(c&&c.grupo==='Gasometria'&&o.sample_type==='venous'&&(o.reference_min==null||o.reference_max==null))return null;
   let lo=o.reference_min, hi=o.reference_max;
   if(lo==null||hi==null){ if(c&&c.ref){lo=c.ref[0];hi=c.ref[1];} }
   if(lo==null||hi==null)return null;
@@ -472,11 +495,11 @@ function renderFolhao(){
   const rowMode=document.getElementById('fltRows').value;
   const presentes=new Set(obsAll.map(o=>o.exam_name_normalized));
 
-  const rows=[]; const secondary=new Set(P.SECONDARY||[]);
+  const rows=[];
   P.GRUPOS.forEach(g=>{
     P.CATALOG.filter(c=>c.grupo===g).forEach(c=>{
       const isFixed=P.FIXED_PANEL.includes(c.key);
-      const showRow = rowMode==='todos' ? true : (isFixed || (presentes.has(c.key) && !secondary.has(c.key)));
+      const showRow = rowMode==='todos' ? true : (isFixed || presentes.has(c.key));
       if(showRow) rows.push(c.key);
     });
   });
@@ -686,7 +709,7 @@ function conservativeMessage(report,added,skipped){
   if(added)parts.push(`<b>${added} resultado(s) importado(s).</b>`);
   if(skipped)parts.push(`${skipped} duplicado(s) ignorado(s).`);
   (report.notices||[]).forEach(n=>parts.push(escapeHtml(n.message)));
-  const labels=[...new Set((report.blocked||[]).filter(x=>!x.culture_artifact).map(x=>x.label).filter(Boolean))];
+  const labels=[...new Set((report.blocked||[]).filter(x=>!x.culture_artifact&&!x.pending_artifact).map(x=>x.label).filter(Boolean))];
   if(labels.length){
     const shown=labels.slice(0,5).map(escapeHtml).join(', '), extra=labels.length>5?` e mais ${labels.length-5}`:'';
     parts.push(`${labels.length} exame(s) fora do quadro não incluído(s): <b>${shown}${extra}</b>.`);
@@ -740,7 +763,7 @@ function commitCulture(cult,useISO){
 function commitResults(results,useISO,report){
   let ok=0,warn=0,skipped=0; const datas=new Set();
   const signature=o=>[
-    o.encounter_id,o.exam_name_normalized,o.collection_datetime,o.value_type,
+    o.encounter_id,o.exam_name_normalized,o.collection_datetime,o.sample_type||'',o.value_type,
     o.value_numeric==null?'':String(o.value_numeric),o.value_text||'',o.unit||''
   ].join('\u001f');
   const existing=new Set(DB.observations.filter(o=>o.encounter_id===curEnc.id).map(signature));
@@ -750,7 +773,8 @@ function commitResults(results,useISO,report){
       exam_name_original:r.exam_name_original,exam_name_normalized:r.exam_name_normalized,
       value_type:r.value_type,value_numeric:r.value_numeric,value_text:r.value_text,unit:r.unit||(P.catByKey(r.exam_name_normalized)||{}).unit,
       reference_min:r.reference_min,reference_max:r.reference_max,reference_text:r.reference_text,
-      collection_datetime:iso,source_type:'import',source_text:r.source_text,confidence:r.confidence,confidence_reason:r.confidence_reason,
+      collection_datetime:iso,sample_type:r.sample_type||null,source_type:'import',source_text:r.source_text,confidence:r.confidence,confidence_reason:r.confidence_reason,
+      ocr_correction:r.ocr_correction||null,
       created_at:new Date().toISOString()};
     const sig=signature(next);
     if(existing.has(sig)){ skipped++; return; }
@@ -1034,16 +1058,16 @@ function doSeed(){
         collection_datetime:dt.toISOString(),source_type:'seed',source_text:'(exemplo)',confidence:'ok',created_at:new Date().toISOString()}); });
   };
   const joao=mkPat('João Silva',3,'12A');
-  addDay(joao,3,{hemoglobina:12.2,leucocitos:18100,plaquetas:230000,creatinina:0.9,ureia:32,sodio:138,potassio:4.1,pcr:210});
-  addDay(joao,2,{hemoglobina:11.7,leucocitos:15600,plaquetas:221000,creatinina:0.9,ureia:38,sodio:139,potassio:4.2,pcr:180});
-  addDay(joao,1,{hemoglobina:10.9,leucocitos:13100,plaquetas:204000,creatinina:1.2,ureia:51,sodio:137,potassio:4.5,pcr:132});
-  addDay(joao,0,{hemoglobina:9.8,leucocitos:9800,plaquetas:190000,creatinina:1.7,ureia:69,sodio:136,potassio:5.2,pcr:71});
+  addDay(joao,3,{hemoglobina:12.2,leucocitos:18100,plaquetas:230000,creatinina:0.9,ureia:32,sodio:138,potassio:4.1,pcr:21});
+  addDay(joao,2,{hemoglobina:11.7,leucocitos:15600,plaquetas:221000,creatinina:0.9,ureia:38,sodio:139,potassio:4.2,pcr:18});
+  addDay(joao,1,{hemoglobina:10.9,leucocitos:13100,plaquetas:204000,creatinina:1.2,ureia:51,sodio:137,potassio:4.5,pcr:13.2});
+  addDay(joao,0,{hemoglobina:9.8,leucocitos:9800,plaquetas:190000,creatinina:1.7,ureia:69,sodio:136,potassio:5.2,pcr:7.1});
   const maria=mkPat('Maria Santos',6,'07');
-  addDay(maria,2,{hemoglobina:9.4,leucocitos:11200,plaquetas:410000,creatinina:1.0,ureia:40,sodio:141,potassio:3.9,pcr:60,albumina:2.8});
-  addDay(maria,0,{hemoglobina:9.1,leucocitos:9800,plaquetas:395000,creatinina:1.0,ureia:37,sodio:140,potassio:4.0,pcr:35,albumina:3.0});
+  addDay(maria,2,{hemoglobina:9.4,leucocitos:11200,plaquetas:410000,creatinina:1.0,ureia:40,sodio:141,potassio:3.9,pcr:6,albumina:2.8});
+  addDay(maria,0,{hemoglobina:9.1,leucocitos:9800,plaquetas:395000,creatinina:1.0,ureia:37,sodio:140,potassio:4.0,pcr:3.5,albumina:3.0});
   const carlos=mkPat('Carlos Souza',1,'15B');
-  addDay(carlos,1,{hemoglobina:13.5,leucocitos:8200,plaquetas:250000,creatinina:1.1,ureia:34,sodio:139,potassio:4.3,pcr:12});
-  addDay(carlos,0,{hemoglobina:13.1,leucocitos:8600,plaquetas:245000,creatinina:1.1,ureia:34,sodio:138,potassio:4.4,pcr:9});
+  addDay(carlos,1,{hemoglobina:13.5,leucocitos:8200,plaquetas:250000,creatinina:1.1,ureia:34,sodio:139,potassio:4.3,pcr:1.2});
+  addDay(carlos,0,{hemoglobina:13.1,leucocitos:8600,plaquetas:245000,creatinina:1.1,ureia:34,sodio:138,potassio:4.4,pcr:0.9});
   save(); renderPacientes();
 }
 

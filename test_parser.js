@@ -373,8 +373,8 @@ check(safeTriage.accepted.every(r=>r.collection_dateISO), 'triagem segura exige 
 const wrongUnit = P.triageConservative('COLETA: 29/08/2026\nSódio: 138 mg/dL');
 check(wrongUnit.accepted.length===0 && wrongUnit.blocked.some(r=>r.reasons.includes('unidade incompatível')), 'unidade incompatível bloqueia importação');
 
-const unsupported = P.triageConservative('COLETA: 29/08/2026\nTGO: 42 U/L');
-check(unsupported.accepted.length===0 && unsupported.blocked.some(r=>r.key==='ast'), 'exame fora do painel automático fica manual');
+const knownAdditional = P.triageConservative('COLETA: 29/08/2026\nTGO: 42 U/L');
+check(knownAdditional.accepted.length===1 && knownAdditional.accepted[0].exam_name_normalized==='ast', 'todo exame conhecido do catálogo entra automaticamente');
 
 const mixed = P.triageConservative(`COLETA: 29/08/2026
 Hemoglobina: 10,8 g/dL
@@ -399,10 +399,10 @@ DATA DA COLETA.: 25/08/2026
 RESULTADO......: 0,85 mg/dL`);
 check(collectionWins.accepted.length===1 && collectionWins.accepted[0].collection_dateISO.slice(0,10)==='2026-08-25', 'DATA DA COLETA prevalece sobre a data do cabeçalho');
 
-const convertedPcr = P.triageConservative(`DATA DA COLETA.: 25/08/2026
+const literalPcr = P.triageConservative(`DATA DA COLETA.: 25/08/2026
 PROTEÍNA C REATIVA QUANTITATIVA
 RESULTADO......: 109,37 mg/dL`);
-check(convertedPcr.accepted.length===1 && convertedPcr.accepted[0].value_numeric===1093.7 && convertedPcr.accepted[0].unit==='mg/L', 'PCR em mg/dL é convertida para mg/L no quadro');
+check(literalPcr.accepted.length===1 && literalPcr.accepted[0].value_numeric===109.37 && P.unitsCompatible(literalPcr.accepted[0].unit,'mg/dL'), 'PCR preserva exatamente valor e unidade impressos no laudo (veio '+JSON.stringify(literalPcr.accepted[0]||literalPcr.blocked)+')');
 
 check(P.unitsCompatible('/mm³','/mm3') && P.unitsCompatible('mEq/L','meq/l') && !P.unitsCompatible('mg/dL','mg/L'), 'normalização de unidade é estrita mas tolera grafia equivalente');
 check(P.unitsCompatible('mil/mm3','milhões/mm³'), 'unidade de hemácias abreviada equivale à unidade extensa');
@@ -449,6 +449,23 @@ const fh={}; fusedHct.accepted.forEach(r=>fh[r.exam_name_normalized]=r);
 check(fh.hematocrito&&fh.hematocrito.value_numeric===37.7&&fh.hematocrito.ocr_correction, 'OCR Controllab: 37,78 sem unidade recupera 37,7 % com rastreio');
 check(fh.bastoes&&fh.bastoes.value_numeric===0&&fh.bastoes.unit==='/mm3', 'OCR Controllab: O /mmº recupera bastões absolutos 0');
 
+const fullHemogramOcr=P.triageConservative(`Controllab
+HEMOGRAMA COMPLETO
+DATA DA COLETA: 20/08/2026
+VCM........: 96,5 EL       80,0 a 100,0 £L
+CHCM.......: 31,6 $        31,0 a 36,0 &
+EOSINÓFILOS: 0,0 5     0 /mmº
+BASÓFILOS..: 0,05      O /mm?
+METAMIELÓCITOS: 2,0 5 505 /mm?
+MIELOCIIOS: 1,05 252 mm?
+PROMIELÓCITOS: 0,05 O /mm?
+BLASTOS: 0,05 O “mm?
+CÉLULAS ATÍPICAS: 0,05 O “mm?`);
+const fhov={}; fullHemogramOcr.accepted.forEach(r=>fhov[r.exam_name_normalized]=r);
+check(fhov.vcm&&fhov.vcm.value_numeric===96.5&&P.unitsCompatible(fhov.vcm.unit,'fL'), 'OCR Controllab: VCM com EL é recuperado como fL');
+check(fhov.chcm&&fhov.chcm.value_numeric===31.6&&fhov.chcm.unit==='%', 'OCR Controllab: CHCM em % entra no quadro');
+[['eosinofilos',0],['basofilos',0],['metamielocitos',505],['mielocitos',252],['promielocitos',0],['blastos',0],['celulas_atipicas',0]].forEach(([k,v])=>check(fhov[k]&&fhov[k].value_numeric===v,k+' com % corrompido pelo OCR preserva a contagem absoluta '+v));
+
 const missingTableResult=P.triageConservative(`Controllab
 HEMOGRAMA COMPLETO
 DATA DA COLETA: 16/08/2026
@@ -466,10 +483,87 @@ PLAQUETAS: 242.500 /mm3
 PLAQUETAS: 450.000 /mm3`);
 check(duplicateConflict.accepted.length===0&&duplicateConflict.blocked.some(r=>r.reasons.includes('resultados conflitantes para o mesmo exame e data')), 'duplicatas divergentes são todas bloqueadas');
 
-check(P.documentNotices('BIÓPSIA — anatomopatológico').some(n=>n.code==='pathology'), 'anatomopatológico é identificado como manual');
-check(P.documentNotices('GASOMETRIA ARTERIAL').some(n=>n.code==='other_lab'), 'exame laboratorial fora do quadro é apenas informado');
+console.log('== gasometria padronizada ==');
+const gasometry=P.triageConservative(`Controllab
+GASOMETRIA ARTERIAL
+DATA DA COLETA: 18/08/2026
+MATERIAL: Sangue Arterial
+VALORES DE REFERÊNCIA
+pE...........os    7,446                       7,35 a 7,45
+POZ......0..0007    87,0   mmiÃg                  83 a 108 mmãg
+PCOZ..........05    49,3   mmilg                  35 a 45 mmig
+ECO3...sassasas      34,2     mmol/L                        21 a 28 mmol/L
+TCOZ...sassasas      35,8     mmol/L                        24 a 31 mmol/L
+BE-D....ass2..3     9,2     mmol/L                       DE -3,0 a +3,0 mmol/L
+$S02C.........]    96,8   $                    95 a 99 &
+ANION -GAP....:      10,4     mmol/L                           DÊ 10 A 14 mmol/L
+ÁCIDO LÁTICO — LACTATO
+MATERIAL: Sangue
+RESULTADO: 1,0 mmol/L`);
+const gv={}; gasometry.accepted.forEach(r=>gv[r.exam_name_normalized]=r);
+const gasExpected={ph:7.446,po2:87,pco2:49.3,hco3:34.2,tco2:35.8,be:9.2,sato2:96.8,anion_gap:10.4,lactato:1};
+check(gasometry.accepted.length===9, 'gasometria: nove resultados automáticos (veio '+gasometry.accepted.length+')');
+Object.keys(gasExpected).forEach(k=>check(gv[k]&&gv[k].value_numeric===gasExpected[k], 'gasometria '+k+' = '+gasExpected[k]+' (veio '+(gv[k]||{}).value_numeric+')'));
+check(gv.ph&&gv.ph.unit==null&&gv.po2.unit==='mmhg'&&gv.sato2.unit==='%', 'gasometria: unidades OCR normalizadas e pH sem unidade');
+check(['ph','po2','pco2','hco3','tco2','be','sato2','anion_gap'].every(k=>gv[k]&&gv[k].sample_type==='arterial')&&gv.lactato.sample_type==null, 'gasometria: amostra arterial preservada sem rotular lactato sérico');
+check(!gasometry.notices.some(n=>n.code==='other_lab'), 'gasometria padronizada não pede anotação manual');
 
-const fixtureExpected={laudo1_transcrito:10,laudo2_transcrito:12,laudo3_transcrito:12};
+const twoSamples=P.triageConservative(`GASOMETRIA VENOSA
+DATA DA COLETA: 18/08/2026
+MATERIAL: Sangue Venoso
+pH: 7,350
+GASOMETRIA ARTERIAL
+DATA DA COLETA: 18/08/2026
+MATERIAL: Sangue Arterial
+pH: 7,440`);
+check(twoSamples.accepted.length===2&&twoSamples.accepted.some(r=>r.sample_type==='venous')&&twoSamples.accepted.some(r=>r.sample_type==='arterial'), 'gasometrias arterial e venosa do mesmo dia não são deduplicadas entre si');
+
+const mixedGasCulture=P.triageConservative(`HEMOCULTURA: ausência de crescimento
+GASOMETRIA ARTERIAL
+DATA DA COLETA: 18/08/2026
+MATERIAL: Sangue Arterial
+pH: 7,440`);
+check(mixedGasCulture.accepted.length===1&&mixedGasCulture.notices.some(n=>n.code==='culture')&&mixedGasCulture.kind==='mixed', 'cultura fica manual sem bloquear gasometria do mesmo documento');
+
+const gasAliasOutside=P.triageConservative(`DATA DA COLETA: 18/08/2026
+POZ: 87,0 mmiÃg`);
+check(gasAliasOutside.accepted.length===0&&gasAliasOutside.blocked.some(r=>r.key==='po2'), 'alias OCR POZ fora de seção de gasometria permanece bloqueado');
+
+check(P.documentNotices('BIÓPSIA — anatomopatológico').some(n=>n.code==='pathology'), 'anatomopatológico é identificado como manual');
+check(!P.documentNotices('GASOMETRIA ARTERIAL').some(n=>n.code==='other_lab'), 'gasometria não é mais classificada fora do quadro');
+const pendingNotices=P.documentNotices('LISTA DE EXAMES PENDENTES\nEAS URINA TIPO 1\nGRAM, BACTERIOSCOPIA\nÁCIDO LÁTICO - LACTATO\nPREVISÃO DE ENTREGA 14/08/2026');
+check(pendingNotices.some(n=>n.code==='pending'), 'exame pendente é avisado sem inventar resultado');
+check(!pendingNotices.some(n=>n.code==='other_lab'), 'EAS/Gram apenas pendentes não geram aviso duplicado de exame fora do quadro');
+
+const extendedPanels=P.triageConservative(`Controllab
+DATA COLETA: 16/08/2026
+COAGULOGRAMA COMPLETO
+TEMPO DE PROTROMBINA
+Plasma Controle do Dia: 13,5 segundos
+Plasma Examinado: 13,5 segundos
+RNI: 1,00
+TEMPO DE TROMBOPLASTINA PARCIAL ATIVADO
+Plasma Controle do Dia: 30,0 segundos
+Plasma Examinado: 30,0 segundos
+BILIRRUBINA TOTAL E FRAÇÕES
+DATA DA COLETA: 16/08/2026
+RESULTADO:
+TOTAL: 0,56 mg/dL
+DIRETA: 0,19 mg/dL
+INDIRETA: 0,37 mg/dL
+VALORES DE REFERÊNCIA:
+BILIRRUBINA TOTAL
+Adultos: 0,2 a 1,2 mg/dL
+DIRETA: Inferior a 0,5 mg/dL
+INDIRETA: Menor que 0,9 mg/dL
+TROPONINA CARDÍACA-I
+DATA COLETA: 16/08/2026
+RESULTADO: NEGATIVA`);
+const ep={};extendedPanels.accepted.forEach(r=>ep[r.exam_name_normalized]=r);
+[['tp',13.5],['inr',1],['ttpa',30],['bilirrubina_total',0.56],['bilirrubina_direta',0.19],['bilirrubina_indireta',0.37]].forEach(([k,v])=>check(ep[k]&&ep[k].value_numeric===v&&(ep[k].collection_dateISO||'').slice(0,10)==='2026-08-16',k+' preserva valor e data da seção'));
+check(ep.troponina_i&&ep.troponina_i.value_type==='qualitative'&&P.norm(ep.troponina_i.value_text)==='negativa','troponina qualitativa conhecida entra como negativa');
+
+const fixtureExpected={laudo1_transcrito:26,laudo2_transcrito:29,laudo3_transcrito:29};
 Object.keys(fixtureExpected).forEach(name=>{
   const fixture=path.join(fixtureDir,name+'.txt');
   if(!fs.existsSync(fixture)){
@@ -478,7 +572,7 @@ Object.keys(fixtureExpected).forEach(name=>{
   }
   const text=fs.readFileSync(fixture,'utf8');
   const report=P.triageConservative(text);
-  check(report.accepted.length===fixtureExpected[name]&&!report.needsDate, name+' importa apenas o painel seguro com data');
+  check(report.accepted.length===fixtureExpected[name]&&!report.needsDate, name+' importa todos os exames conhecidos com data (veio '+report.accepted.length+': '+report.accepted.map(r=>r.exam_name_normalized).join(', ')+')');
 });
 const cultureFixture=P.triageConservative(fs.readFileSync(path.join(fixtureDir,'culturas.md'),'utf8'));
 check(cultureFixture.accepted.length===0&&cultureFixture.notices.some(n=>n.code==='culture'), 'fixture de culturas é somente manual');
