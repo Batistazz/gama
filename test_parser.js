@@ -489,6 +489,16 @@ VALORES DE REFERÊNCIA:`);
 const hfixed={};hospitalFixed.accepted.forEach(r=>hfixed[r.exam_name_normalized]=r);
 check(P.isHospitalLabText('Controllab\nCONTROLE DE QUALIDADE\nGASOMETRIA ARTERIAL'),'perfil KN/Controllab do hospital é identificado');
 check(!P.isHospitalLabText('Outro laboratório\nHEMOGRAMA COMPLETO'),'outro laboratório não recebe regras fixas KN');
+check(P.isHospitalLabText('Contr0llab\nCONTROLE DE QUALIDADE\nHEMOGRAMA COMPLETO'),'erro pequeno de OCR no logotipo Controllab é tolerado com estrutura compatível');
+const partialHospital=P.assessHospitalLabText(`CONTROLE DE QUALIDADE
+SANTA CASA
+HEMOGRAMA COMPLETO
+DATA DA COLETA: 16/08/2026
+RESULTADO: 10,8 g/dL
+VALOR DE REFERÊNCIA: 12,0 a 16,0 g/dL`);
+check(partialHospital.accepted&&partialHospital.confidence==='probable','perfil hospitalar parcialmente confirmado sobrevive à perda do logotipo');
+check(!P.isHospitalLabText('HEMOGRAMA COMPLETO\nDATA DA COLETA: 16/08/2026\nHemoglobina: 10,8 g/dL'),'estrutura laboratorial genérica sem sinais KN continua recusada');
+check(!P.isHospitalLabText('OUTRO LABORATÓRIO\nCONTROLE DE QUALIDADE\nHEMOGRAMA COMPLETO\nDATA DA COLETA: 16/08/2026\nRESULTADO: 10,8 g/dL\nVALOR DE REFERÊNCIA: 12,0 a 16,0 g/dL'),'outro laboratório com estrutura genérica completa continua recusado');
 [['hematocrito',37.7],['vcm',95.4],['chcm',31.8],['rdw',15.3],['bastoes',2018],['celulas_atipicas',0],['pco2',38.5],['sato2',91.2],['bilirrubina_total',0.56],['bilirrubina_direta',0.19],['bilirrubina_indireta',0.37]].forEach(([k,v])=>check(hfixed[k]&&hfixed[k].value_numeric===v,'perfil hospitalar fixo recupera '+k+' = '+v+' sem depender da unidade OCR (veio '+(hfixed[k]||{}).value_numeric+')'));
 check(['vcm','chcm','rdw','bastoes','celulas_atipicas','pco2','sato2','bilirrubina_total','bilirrubina_direta','bilirrubina_indireta'].every(k=>hfixed[k]&&hfixed[k].confidence==='ok'),'campos fixos hospitalares recuperados entram com confiança ok');
 

@@ -10,13 +10,44 @@
   /* ---------- utilidades ---------- */
   function stripAccents(s){ return (s||'').normalize('NFD').replace(/[̀-ͯ]/g,''); }
   function norm(s){ return stripAccents(String(s||'').toLowerCase()); }
-  function isHospitalLabText(text){
-    var t=norm(text);
-    // Identificação deliberadamente específica do modelo usado pelo hospital.
-    // O parser genérico continua guardado, mas as regras fixas abaixo só podem
-    // ser ativadas quando o laudo KN/Controllab estiver inequivocamente presente.
-    return /controllab/.test(t) && /controle de qualidade|rua maria gertrudes|citometria de fluxo|imuno-turbidimetria|hemograma completo|gasometria arterial/.test(t);
+  function editDistance(a,b){
+    a=String(a||''); b=String(b||'');
+    var prev=[],cur=[],i,j;
+    for(j=0;j<=b.length;j++) prev[j]=j;
+    for(i=1;i<=a.length;i++){
+      cur[0]=i;
+      for(j=1;j<=b.length;j++) cur[j]=Math.min(cur[j-1]+1,prev[j]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));
+      prev=cur; cur=[];
+    }
+    return prev[b.length];
   }
+  function assessHospitalLabText(text){
+    var t=norm(text), tokens=t.match(/[a-z0-9]{7,12}/g)||[];
+    // O logotipo é uma região especialmente sujeita a OCR. Aceitamos até
+    // duas trocas/omissões em "Controllab", mas nunca usamos só o logotipo:
+    // o restante do formulário também precisa fornecer evidência estrutural.
+    var brand=tokens.some(function(x){return editDistance(x,'controllab')<=2;});
+    var evidence={
+      quality:/controle de qualidade/.test(t),
+      address:/rua maria gertrudes/.test(t),
+      hospital:/santa casa/.test(t),
+      panel:/hemograma completo|gasometria (?:arterial|venosa)|coagulograma/.test(t),
+      collection:/data da coleta|coleta\s*:/.test(t),
+      resultReference:/resultado[\s\S]{0,900}valor(?:es)? de referencia/.test(t),
+      method:/citometria de fluxo|imuno-?turbidimetria/.test(t)
+    };
+    var structural=Object.keys(evidence).filter(function(k){return evidence[k];});
+    var accepted=(brand&&structural.length>=1)
+      ||(evidence.address&&evidence.panel&&evidence.collection)
+      ||(evidence.quality&&evidence.panel&&evidence.collection&&(evidence.hospital||evidence.method||evidence.address));
+    return {
+      accepted:accepted,
+      confidence:accepted?(brand?'confirmed':'probable'):'none',
+      brandMatched:brand,
+      evidence:structural
+    };
+  }
+  function isHospitalLabText(text){ return assessHospitalLabText(text).accepted; }
 
   // Limpa o "pontilhado" (leaders "..........:") que o OCR transforma em INTEIRO-LIXO grudado
   // no rótulo/valor (ex.: "HEMÁCIAS...ci221022022..1 3,95" ou "PLAQUETAS. ...12220020222..1 216.900").
@@ -533,7 +564,8 @@
   /* ---------- pipeline principal ---------- */
   function parseLabText(text){
     var rawText=String(text||'');
-    var profile=isHospitalLabText(rawText)?'hospital_kn':null;
+    var profileAssessment=assessHospitalLabText(rawText);
+    var profile=profileAssessment.accepted?'hospital_kn':null;
     var lines = rawText.split(/\r?\n/).map(function(s){
       return {raw:cleanLeaders(s.replace(/\t/g,'    ').trim()),compact:cleanLeaders(s.replace(/\s+/g,' ').trim())};
     }).filter(function(x){return !!x.compact;});
@@ -691,7 +723,7 @@
     }
 
     appendStructuredPanels();
-    return { results: results, dateISO: docDate, profile:profile };
+    return { results: results, dateISO: docDate, profile:profile, profileAssessment:profileAssessment };
 
     function appendStructured(key,valueText,unit,sourceText,valueType,sectionDate){
       var c=catByKey(key), r={
@@ -825,7 +857,7 @@
     return {
       kind:(notices.length&&accepted.length)?'mixed':(notices.length?notices[0].code:'lab'),
       accepted:accepted, blocked:blocked, notices:notices, needsDate:needsDate,
-      dateISO:parsed.dateISO, profile:parsed.profile, recognizedCount:parsed.results.length
+      dateISO:parsed.dateISO, profile:parsed.profile, profileAssessment:parsed.profileAssessment, recognizedCount:parsed.results.length
     };
   }
 
@@ -841,6 +873,7 @@
     detectDate: detectDate,
     parseNumBR: parseNumBR,
     norm: norm,
+    assessHospitalLabText: assessHospitalLabText,
     isHospitalLabText: isHospitalLabText,
     CATALOG: CATALOG,
     GASOMETRY_PANEL: GASOMETRY_PANEL,

@@ -64,7 +64,10 @@
   .low{background:var(--lowbg);color:var(--low);font-weight:700}
   .high{background:var(--highbg);color:var(--high);font-weight:700}
   .warncell{box-shadow:inset 0 0 0 2px var(--warn);background:var(--warnbg)}
-  .nx{font-size:9px;color:var(--muted);vertical-align:super}
+  .obslist{display:flex;flex-direction:column;align-items:center;gap:2px}
+  .obsitem{display:inline-flex;align-items:center;justify-content:center;gap:3px;min-width:100%;border-radius:4px;padding:1px 3px}
+  .obsitem .mk{position:static;margin-left:1px}
+  .sampletag{display:inline-block;border:1px solid currentColor;border-radius:8px;padding:0 4px;font-size:8px;font-weight:700;line-height:1.4;text-transform:uppercase;letter-spacing:.15px;color:var(--accent2);background:#fff}
   .mk{position:absolute;top:0;right:2px;font-size:8px;font-weight:700;line-height:1.1;opacity:.7;letter-spacing:-1px}   /* +/++ acima, −/−− abaixo — detalhe no canto */
   /* folha em branco (imprimir p/ preencher à mão) */
   .folha td.bk,.folha th.bk{min-width:64px}
@@ -147,6 +150,7 @@
     .folha thead th{background:#f0f0f0!important}
     .low,.high{background:#ececec!important;font-weight:700}   /* um único cinza p/ "anormal" */
     .warncell{box-shadow:none!important;background:#fff!important;outline:2px solid #000;outline-offset:-2px}
+    .sampletag{border:1px solid #000!important;color:#000!important;background:#fff!important}
     .folha td.grpv{background:#e6e6e6!important}
     .folha td.grpv>span{color:#000!important}
     .legend{color:#000;margin-top:6px}
@@ -223,6 +227,7 @@
           <span class="noprint"><span class="sw high"></span>acima da referência (+/++)</span>
           <span class="noprint"><span class="sw low"></span>abaixo da referência (−/−−)</span>
           <span class="noprint"><span class="sw warn"></span>incerto (confira)</span>
+          <span>arterial/venosa = tipo da amostra</span>
           <span class="print-only">+/++ = acima · −/−− = abaixo (2 sinais = bem fora) · ▢ = incerto</span>
         </div>
       </div>
@@ -272,7 +277,7 @@ Potássio: 5,2 mEq/L"></textarea>
 
 <script src="vendor/tesseract/tesseract.min.js"></script>
 <script src="vendor/pdf.min.js"></script>
-<script src="parser.js?v=20260830-1"></script>
+<script src="parser.js?v=20260903-1"></script>
 <script>
 'use strict';
 const P = window.Parser;
@@ -307,22 +312,32 @@ const fmtDay=iso=>{const s=String(iso||'');const m=s.match(/^(\d{4})-(\d{2})-(\d
 const fmtTime=iso=>new Date(iso).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
 function fmtNum(n,dec){ if(n==null||isNaN(n))return'—'; return n.toLocaleString('pt-BR',{minimumFractionDigits:dec||0,maximumFractionDigits:dec||0}); }
 function obsDisplay(o){
-  const sample=o.sample_type==='arterial'?'A·':(o.sample_type==='venous'?'V·':'');
   const c=P.catByKey(o.exam_name_normalized);
   if(!c){ // exame fora do catálogo: mostra o texto original do valor
-    return sample+(o.value_text||(o.value_numeric!=null?fmtNum(o.value_numeric,2):'—'));
+    return o.value_text||(o.value_numeric!=null?fmtNum(o.value_numeric,2):'—');
   }
   // Em importações, conserva a representação numérica validada do próprio
   // laudo (145,9 não pode virar 146; 138,70 não pode perder casas decimais).
   if(o.source_type==='import' && o.value_type==='numeric' && /^[+-]?(?:\d{1,3}(?:\.\d{3})+|\d+)(?:,\d+)?$/.test(String(o.value_text||'').trim())){
     const sourceNumber=P.parseNumBR(o.value_text);
-    if(sourceNumber!=null && Math.abs(sourceNumber-o.value_numeric)<1e-9) return sample+String(o.value_text).trim();
+    if(sourceNumber!=null && Math.abs(sourceNumber-o.value_numeric)<1e-9) return String(o.value_text).trim();
   }
   const dec=c.dec;
-  if(o.value_type==='numeric') return sample+fmtNum(o.value_numeric,dec);
-  if(o.value_type==='less_than') return sample+'&lt;'+fmtNum(o.value_numeric,dec);
-  if(o.value_type==='greater_than') return sample+'&gt;'+fmtNum(o.value_numeric,dec);
-  return sample+escapeHtml(o.value_text||'—');
+  if(o.value_type==='numeric') return fmtNum(o.value_numeric,dec);
+  if(o.value_type==='less_than') return '&lt;'+fmtNum(o.value_numeric,dec);
+  if(o.value_type==='greater_than') return '&gt;'+fmtNum(o.value_numeric,dec);
+  return escapeHtml(o.value_text||'—');
+}
+function sampleBadge(o){
+  const label=o.sample_type==='arterial'?'arterial':(o.sample_type==='venous'?'venosa':'');
+  return label?`<span class="sampletag">${label}</span>`:'';
+}
+function observationHtml(o){
+  const ab=abnormal(o), cls=['obsitem'];
+  if(ab&&ab.dir)cls.push(ab.dir);
+  if(o.confidence==='warn')cls.push('warncell');
+  const mk=(ab&&ab.mark)?`<span class="mk">${ab.mark}</span>`:'';
+  return `<span class="${cls.join(' ')}"><span class="obsnum">${obsDisplay(o)}</span>${sampleBadge(o)}${mk}</span>`;
 }
 // Metadados do exame: do catálogo, ou (se fora do catálogo) da própria observação → grupo "Outros"
 function examMeta(key){
@@ -530,13 +545,11 @@ function renderFolhao(){
       if(gi===0) h+=`<td class="grpv" rowspan="${grp.keys.length}" title="Grupo: ${escapeHtml(grp.grupo)}"><span>${escapeHtml(GRP_LABEL[grp.grupo]||grp.grupo)}</span></td>`;
       h+=`<td class="ex">${escapeHtml(c.label)} <span class="u">${escapeHtml(c.unit||'')}</span></td>`;
       days.forEach(d=>{
-        const list=obsOfDay(key,d,obsAll); const o=list[list.length-1];
-        if(!o){ h+=`<td class="cell empty" data-k="${escapeHtml(key)}" data-d="${escapeHtml(d)}">·</td>`; return; }
-        const ab=abnormal(o); let cls='cell'; if(ab&&ab.dir==='low')cls+=' low'; if(ab&&ab.dir==='high')cls+=' high';
-        if(o.confidence==='warn')cls+=' warncell';
-        const mk=(ab&&ab.mark)?`<span class="mk">${ab.mark}</span>`:'';
-        const nx=list.length>1?`<span class="nx">${list.length}×</span>`:'';
-        h+=`<td class="${cls}" data-k="${escapeHtml(key)}" data-d="${escapeHtml(d)}" title="${escapeHtml(o.confidence==='warn'?'incerto: '+(o.confidence_reason||'')+' — confira':'')}">${obsDisplay(o)}${mk}${nx}</td>`;
+        const list=obsOfDay(key,d,obsAll);
+        if(!list.length){ h+=`<td class="cell empty" data-k="${escapeHtml(key)}" data-d="${escapeHtml(d)}">·</td>`; return; }
+        const warnings=list.filter(o=>o.confidence==='warn').map(o=>o.confidence_reason||'extração incerta');
+        const title=warnings.length?'incerto: '+warnings.join('; ')+' — confira':'';
+        h+=`<td class="cell" data-k="${escapeHtml(key)}" data-d="${escapeHtml(d)}" title="${escapeHtml(title)}"><span class="obslist">${list.map(observationHtml).join('')}</span></td>`;
       });
       for(let i=0;i<NBLANK;i++) h+='<td class="fillcol bk">&nbsp;</td>';
       const nums=series.filter(s=>s.v!=null);
@@ -582,7 +595,7 @@ function cellModal(examKey,day){
   let h=`<h3>${escapeHtml(c.label)} <span class="muted small">${escapeHtml(c.unit||'')}</span></h3><div class="muted small">${fmtDay(day)}</div>`;
   if(list.length){
     h+=list.map(o=>`<div class="valrow">
-      <span class="v">${obsDisplay(o)}</span><span class="t">${fmtTime(o.collection_datetime)}</span>
+      <span class="v">${obsDisplay(o)}</span>${sampleBadge(o)}<span class="t">${fmtTime(o.collection_datetime)}</span>
       ${o.confidence==='warn'?'<span class="flag warn" title="'+escapeHtml(o.confidence_reason||'')+'">incerto</span>':''}
       <div style="flex:1"></div>
       <button class="btn sm ghost" data-del="${o.id}">excluir</button>
@@ -706,16 +719,33 @@ function renderPrintHeader(){
 document.getElementById('btnProcess').onclick=()=>doProcess(document.getElementById('pasteArea').value);
 function conservativeMessage(report,added,skipped,corrected){
   const parts=[];
-  if(added)parts.push(`<b>${added} resultado(s) importado(s).</b>`);
+  parts.push(`<b>${added} resultado(s) importado(s).</b>`);
   if(corrected)parts.push(`${corrected} leitura(s) anterior(es) corrigida(s).`);
   if(skipped)parts.push(`${skipped} duplicado(s) ignorado(s).`);
+  if(report.profileAssessment&&report.profileAssessment.confidence==='probable')parts.push('Modelo hospitalar reconhecido pela estrutura; o logotipo estava ilegível ou ausente no OCR.');
   (report.notices||[]).forEach(n=>parts.push(escapeHtml(n.message)));
-  const labels=[...new Set((report.blocked||[]).filter(x=>!x.culture_artifact&&!x.pending_artifact).map(x=>x.label).filter(Boolean))];
-  if(labels.length){
-    const shown=labels.slice(0,5).map(escapeHtml).join(', '), extra=labels.length>5?` e mais ${labels.length-5}`:'';
-    parts.push(`${labels.length} exame(s) fora do quadro não incluído(s): <b>${shown}${extra}</b>.`);
+  const blocked=(report.blocked||[]).filter(x=>!x.culture_artifact&&!x.pending_artifact);
+  const groups={};
+  blocked.forEach(x=>{
+    const reasons=x.reasons||[];
+    const key=reasons.some(r=>/conflit/.test(r))?'conflito'
+      :reasons.some(r=>/unidade/.test(r))?'unidade'
+      :reasons.some(r=>/plausível|fisiológica/.test(r))?'plausibilidade'
+      :reasons.some(r=>/não numérico/.test(r))?'manual'
+      :reasons.some(r=>/incert|confiança|símbolo|sem unidade/.test(r))?'ocr'
+      :reasons.some(r=>/fora do catálogo|fora do painel/.test(r))?'catalogo':'outro';
+    (groups[key]=groups[key]||[]).push(x.label);
+  });
+  if(blocked.length){
+    const names={conflito:'conflito de resultados',unidade:'unidade incompatível ou ausente',plausibilidade:'valor fora da faixa plausível',manual:'resultado qualitativo/manual',ocr:'extração incerta',catalogo:'fora do catálogo automático',outro:'outro bloqueio de segurança'};
+    const details=Object.keys(groups).map(k=>{
+      const labels=[...new Set(groups[k].filter(Boolean))], shown=labels.slice(0,3).map(escapeHtml).join(', '), extra=labels.length>3?` e mais ${labels.length-3}`:'';
+      return `${groups[k].length} por ${names[k]}${shown?` (<b>${shown}${extra}</b>)`:''}`;
+    });
+    parts.push(`<b>${blocked.length} resultado(s) pendente(s) para conferência:</b> ${details.join('; ')}.`);
+  }else{
+    parts.push('<b>0 resultados pendentes para conferência.</b>');
   }
-  if(!parts.length)parts.push('Nenhum exame do quadro foi identificado neste arquivo.');
   return parts.join(' ');
 }
 function doProcess(text,fallbackDateISO){
@@ -780,7 +810,7 @@ function commitResults(results,useISO,report){
       value_type:r.value_type,value_numeric:r.value_numeric,value_text:r.value_text,unit:r.unit||(P.catByKey(r.exam_name_normalized)||{}).unit,
       reference_min:r.reference_min,reference_max:r.reference_max,reference_text:r.reference_text,
       collection_datetime:iso,sample_type:r.sample_type||null,source_type:'import',source_text:r.source_text,confidence:r.confidence,confidence_reason:r.confidence_reason,
-      ocr_correction:r.ocr_correction||null,source_profile:r.source_profile||null,import_version:'20260830-2',
+      ocr_correction:r.ocr_correction||null,source_profile:r.source_profile||null,import_version:'20260903-1',
       created_at:new Date().toISOString()};
     const sig=signature(next);
     // Reprocessar o mesmo laudo deve corrigir a leitura anterior, não empilhar
@@ -849,7 +879,8 @@ async function importarArquivo(file){
     }
     const text=lines.join('\n'); document.getElementById('pasteArea').value=text;
     if(!text.trim()){ msgImport('warn','Não consegui ler este PDF.'); return; }
-    if(!P.isHospitalLabText(text)){
+    const profile=P.assessHospitalLabText(text);
+    if(!profile.accepted){
       msgImport('warn','Este PDF não corresponde ao modelo KN/Controllab do hospital. Por segurança, nenhum resultado foi colocado no quadro.');
       return;
     }
