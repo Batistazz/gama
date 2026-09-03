@@ -440,6 +440,26 @@ check(ct.bastoes&&ct.bastoes.value_numeric===3444&&ct.bastoes.unit==='/mm3', 'OC
 check(ct.plaquetas&&ct.plaquetas.value_numeric===306400, 'OCR Controllab: plaquetas usa resultado 306.400, nunca referência 450.000');
 check(ct.sodio&&ct.sodio.value_numeric===144.8&&ct.sodio.unit==='meq/l', 'OCR Controllab: mEqg/L é normalizado estritamente');
 
+// O PDF.js mantém vários espaços entre ":" e a coluna do resultado. Esses
+// espaços iniciais não podem ser confundidos com a divisória resultado/VR.
+const nativePdfHemogram=P.triageConservative(`CONTROLE DE QUALIDADE
+SANTA CASA
+HEMOGRAMA COMPLETO
+COLETA...:02/09/2026
+MÉTODO...:Sistema Automatizado - Citometria de Fluxo
+HEMÁCIAS...............:   4,72   milhões/mm³   4,20 a 5,90 milhões/mm³
+HEMOGLOBINA............:   13,7   g/dL   13,0 a 18,0 g/dL
+HEMATÓCRITO............:   43,2   %   38,0 a 52,0 %
+VCM....................:   91,5   fL   80,0 a 100,0 fL
+HCM....................:   29,0   pg   27,0 a 31,0 pg
+CHCM...................:   31,7   %   31,0 a 36,0 %
+RDW....................:   16,2   %   10,0 a 16,0 %
+LEUCÓCITOS - GLOBAL....:   9.400   céls/mm³   4.000 a 11.000 céls/mm³
+PLAQUETAS..............:   314.500   /mm³   140.000 a 450.000 /mm³
+VPM....................:   7,72   FL   9,2 a 12,6 FL`);
+const nph={}; nativePdfHemogram.accepted.forEach(r=>nph[r.exam_name_normalized]=r);
+[['hemacias',4.72],['hemoglobina',13.7],['hematocrito',43.2],['vcm',91.5],['hcm',29],['chcm',31.7],['rdw',16.2],['leucocitos',9400],['plaquetas',314500],['vpm',7.72]].forEach(([k,v])=>check(nph[k]&&nph[k].value_numeric===v,'PDF.js Controllab preserva '+k+' = '+v+' com espaços após dois-pontos'));
+
 const fusedHct=P.triageConservative(`Controllab
 HEMOGRAMA COMPLETO
 DATA DA COLETA: 16/08/2026

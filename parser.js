@@ -279,6 +279,9 @@
       var leading=valuePart.match(/^\s*(-?\d{1,3}(?:\.\d{3})+(?:,\d+)?|-?\d+,\d+|-?\d+\.\d+|-?\d+)/);
       if(!leading) return null;
       var leadingTail=valuePart.slice(leading.index+leading[0].length);
+      // Se o primeiro número já abre uma faixa ("140.000 a 450.000"), a
+      // coluna de resultado está vazia. Nunca promover o limite da referência.
+      if(/^\s*(?:a|at[eé]|[-–])\s*-?\d/i.test(leadingTail)) return {blocked_table_value:true};
       var leadingUnit=unitAtStart(leadingTail,key==='hematocrito'||key==='chcm'||key==='rdw');
       if(!leadingUnit && (key==='vcm'||key==='vpm') && /^[e£f]\s*l\b/i.test(leadingTail.trim())) leadingUnit='fl';
       // Neste formulário fixo, a dimensão vem do próprio campo mapeado. Não
@@ -329,7 +332,13 @@
     // parte "valor": remove parentéticos pra não pegar a referência como valor
     var valuePart = l.replace(/\([^)]*\)/g,' ').replace(/\[[^\]]*\]/g,' ');
     var ci = valuePart.indexOf(':');
-    if(ci>=0 && /\d/.test(valuePart.slice(ci+1))) valuePart = valuePart.slice(ci+1);   // valor vem DEPOIS do ":" (não pega o dígito do nome, ex.: PCO2/HCO3/TCO2)
+    if(ci>=0 && /\d/.test(valuePart.slice(ci+1))) {
+      // O PDF.js preserva a coluna do resultado como espaços logo depois de
+      // ":". Eles não são a divisória entre RESULTADO e REFERÊNCIA. Removê-los
+      // antes de procurar a divisória evita bloquear hemoglobina, hematócrito,
+      // leucócitos, plaquetas e os demais campos de coluna única do hemograma.
+      valuePart = valuePart.slice(ci+1).replace(/^\s+/, '');
+    }   // valor vem DEPOIS do ":" (não pega o dígito do nome, ex.: PCO2/HCO3/TCO2)
     var vpn = norm(valuePart);
 
     if(profile==='hospital_kn' && key && (CONTROLLAB_SINGLE_COLUMN[key]||CONTROLLAB_DIFFERENTIAL[key])){
