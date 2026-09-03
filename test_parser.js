@@ -545,6 +545,33 @@ DIRETA: 0,56 mg/dL
 VALORES DE REFERÊNCIA:`);
 check(!bilirubinMismatch.accepted.some(r=>/^bilirrubina_/.test(r.exam_name_normalized)),'bilirrubinas que não fecham matematicamente são bloqueadas');
 
+const standaloneLithium=P.triageConservative(`CONTROLE DE QUALIDADE
+SANTA CASA
+RUA MARIA GERTRUDES DOS SANTOS, 218
+LÍTIO
+DATA DA COLETA: 30/08/2026
+MATERIAL: Sangue
+MÉTODO: ELETRODO ÍON SELETIVO
+RESULTADO: 1,85 mmol/L
+VALOR DE REFERÊNCIA: DE 0,50 A 1,20 mmol/L`);
+check(standaloneLithium.profileAssessment.accepted,'laudo hospitalar unitário de lítio é reconhecido pela estrutura completa');
+const sl=get(standaloneLithium.accepted,'litio');
+check(sl&&sl.value_numeric===1.85&&sl.unit==='mmol/l','laudo unitário importa lítio 1,85 mmol/L');
+const standaloneBilirubin=P.triageConservative(`CONTROLE DE QUALIDADE
+SANTA CASA
+RUA MARIA GERTRUDES DOS SANTOS, 218
+BILIRRUBINA TOTAL E FRAÇÕES
+DATA DA COLETA: 29/08/2026
+RESULTADO:
+0,47 mg/dL
+TOTAL:
+0,12 mg/dL
+DIRETA:
+INDIRETA: 0,35 mg/dL
+VALORES DE REFERÊNCIA:`);
+check(standaloneBilirubin.profileAssessment.accepted&&standaloneBilirubin.accepted.filter(r=>/^bilirrubina_/.test(r.exam_name_normalized)).length===3,'laudo hospitalar unitário importa as três bilirrubinas');
+check(!P.assessHospitalLabText('OUTRO LABORATÓRIO\nLÍTIO\nDATA DA COLETA: 30/08/2026\nRESULTADO: 1,85 mmol/L\nVALOR DE REFERÊNCIA: 0,50 A 1,20').accepted,'lítio de outro laboratório continua recusado');
+
 const differentialPercentOnly=P.triageConservative(`Controllab
 CONTROLE DE QUALIDADE
 HEMOGRAMA COMPLETO

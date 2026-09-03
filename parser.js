@@ -32,6 +32,7 @@
       address:/rua maria gertrudes/.test(t),
       hospital:/santa casa/.test(t),
       panel:/hemograma completo|gasometria (?:arterial|venosa)|coagulograma/.test(t),
+      standalone:/\blitio\b|bilirrubina total e frac/.test(t),
       collection:/data da coleta|coleta\s*:/.test(t),
       resultReference:/resultado[\s\S]{0,900}valor(?:es)? de referencia/.test(t),
       method:/citometria de fluxo|imuno-?turbidimetria/.test(t)
@@ -39,7 +40,8 @@
     var structural=Object.keys(evidence).filter(function(k){return evidence[k];});
     var accepted=(brand&&structural.length>=1)
       ||(evidence.address&&evidence.panel&&evidence.collection)
-      ||(evidence.quality&&evidence.panel&&evidence.collection&&(evidence.hospital||evidence.method||evidence.address));
+      ||(evidence.quality&&evidence.panel&&evidence.collection&&(evidence.hospital||evidence.method||evidence.address))
+      ||(evidence.quality&&evidence.address&&evidence.hospital&&evidence.standalone&&evidence.collection&&evidence.resultReference);
     return {
       accepted:accepted,
       confidence:accepted?(brand?'confirmed':'probable'):'none',
@@ -113,6 +115,7 @@
     {key:'cloro',label:'Cloro',grupo:'Eletrólitos',unit:'mEq/L',dec:0,ref:[98,107],plaus:[70,140],aliases:['cloro','cloreto','cl']},
     // Metabólico
     {key:'glicose',label:'Glicose',grupo:'Metabólico',unit:'mg/dL',dec:0,ref:[70,99],plaus:[10,1500],aliases:['glicemia','glicose','glucose']},
+    {key:'litio',label:'Lítio',grupo:'Metabólico',unit:'mmol/L',dec:2,ref:[0.5,1.2],plaus:[0,10],aliases:['litio','lithium']},
     {key:'acido_urico',label:'Ácido úrico',grupo:'Metabólico',unit:'mg/dL',dec:1,ref:[3.5,7.2],plaus:[0.5,25],aliases:['acido urico','ac urico','urato']},
     {key:'ldh',label:'DHL (LDH)',grupo:'Metabólico',unit:'U/L',dec:0,ref:[120,246],plaus:[50,10000],aliases:['lactato desidrogenase','desidrogenase latica','ldh','dhl']},
     {key:'amilase',label:'Amilase',grupo:'Metabólico',unit:'U/L',dec:1,ref:[28,100],plaus:[1,5000],aliases:['amilase']},
