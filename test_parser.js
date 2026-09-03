@@ -522,6 +522,29 @@ check(!P.isHospitalLabText('OUTRO LABORATÓRIO\nCONTROLE DE QUALIDADE\nHEMOGRAMA
 [['hematocrito',37.7],['vcm',95.4],['chcm',31.8],['rdw',15.3],['bastoes',2018],['celulas_atipicas',0],['pco2',38.5],['sato2',91.2],['bilirrubina_total',0.56],['bilirrubina_direta',0.19],['bilirrubina_indireta',0.37]].forEach(([k,v])=>check(hfixed[k]&&hfixed[k].value_numeric===v,'perfil hospitalar fixo recupera '+k+' = '+v+' sem depender da unidade OCR (veio '+(hfixed[k]||{}).value_numeric+')'));
 check(['vcm','chcm','rdw','bastoes','celulas_atipicas','pco2','sato2','bilirrubina_total','bilirrubina_direta','bilirrubina_indireta'].every(k=>hfixed[k]&&hfixed[k].confidence==='ok'),'campos fixos hospitalares recuperados entram com confiança ok');
 
+const bilirubinPdfLayout=P.triageConservative(`Controllab
+CONTROLE DE QUALIDADE
+BILIRRUBINA TOTAL E FRAÇÕES
+DATA DA COLETA: 28/08/2026
+RESULTADO:
+0,66 mg/dL
+TOTAL..........:
+0,10 mg/dL
+DIRETA.........:
+INDIRETA.......: 0,56 mg/dL
+VALORES DE REFERÊNCIA:`);
+const bpl={}; bilirubinPdfLayout.accepted.forEach(r=>bpl[r.exam_name_normalized]=r);
+[['bilirrubina_total',0.66],['bilirrubina_direta',0.10],['bilirrubina_indireta',0.56]].forEach(([k,v])=>check(bpl[k]&&bpl[k].value_numeric===v,'layout real do PDF preserva '+k+' = '+v));
+const bilirubinMismatch=P.triageConservative(`Controllab
+BILIRRUBINA TOTAL E FRAÇÕES
+DATA DA COLETA: 28/08/2026
+RESULTADO:
+0,66 mg/dL
+TOTAL: 0,40 mg/dL
+DIRETA: 0,56 mg/dL
+VALORES DE REFERÊNCIA:`);
+check(!bilirubinMismatch.accepted.some(r=>/^bilirrubina_/.test(r.exam_name_normalized)),'bilirrubinas que não fecham matematicamente são bloqueadas');
+
 const differentialPercentOnly=P.triageConservative(`Controllab
 CONTROLE DE QUALIDADE
 HEMOGRAMA COMPLETO

@@ -758,14 +758,20 @@
         var biliWindow=rawText.slice(biliHeading.index,biliHeading.index+1800);
         var resultStart=biliWindow.search(/resultado\s*:/i), referenceStart=biliWindow.search(/valores?\s+de\s+refer/i);
         var biliResult=resultStart>=0?biliWindow.slice(resultStart,referenceStart>resultStart?referenceStart:Math.min(biliWindow.length,resultStart+500)):'';
-        var total=biliResult.match(/(?:^|\n)\s*total[^0-9]{0,40}(-?\d[\d.]*(?:,\d+)?)/i);
-        var direct=biliResult.match(/(?:^|\n)\s*direta[^0-9]{0,40}(-?\d[\d.]*(?:,\d+)?)/i);
-        var indirect=biliResult.match(/(?:^|\n)\s*indireta[^0-9]{0,40}(-?\d[\d.]*(?:,\d+)?)/i);
-        if(total&&direct&&indirect){
+        // O PDF.js pode ordenar a coluna numérica antes do rótulo visual:
+        // 0,66 / TOTAL / 0,10 / DIRETA / INDIRETA 0,56. Dentro do bloco de
+        // resultados, os três valores continuam na ordem total, direta e
+        // indireta. A soma funciona como portão determinístico contra deslocamento.
+        var biliNumbers=biliResult.match(/-?\d{1,3}(?:\.\d{3})*(?:,\d+)?|-?\d+(?:[.,]\d+)?/g)||[];
+        var total=biliNumbers.length>=3?biliNumbers[0]:null;
+        var direct=biliNumbers.length>=3?biliNumbers[1]:null;
+        var indirect=biliNumbers.length>=3?biliNumbers[2]:null;
+        var biliCloses=total!=null&&Math.abs(parseNumBR(total)-parseNumBR(direct)-parseNumBR(indirect))<=0.03;
+        if(biliCloses){
           var biliDate=detectDate(biliWindow.slice(0,resultStart>=0?resultStart:500))||nearestCollectionDate(biliHeading.index);
-          appendStructured('bilirrubina_total',total[1],'mg/dL','BILIRRUBINA TOTAL: '+total[1]+' mg/dL',null,biliDate);
-          appendStructured('bilirrubina_direta',direct[1],'mg/dL','BILIRRUBINA DIRETA: '+direct[1]+' mg/dL',null,biliDate);
-          appendStructured('bilirrubina_indireta',indirect[1],'mg/dL','BILIRRUBINA INDIRETA: '+indirect[1]+' mg/dL',null,biliDate);
+          appendStructured('bilirrubina_total',total,'mg/dL','BILIRRUBINA TOTAL: '+total+' mg/dL',null,biliDate);
+          appendStructured('bilirrubina_direta',direct,'mg/dL','BILIRRUBINA DIRETA: '+direct+' mg/dL',null,biliDate);
+          appendStructured('bilirrubina_indireta',indirect,'mg/dL','BILIRRUBINA INDIRETA: '+indirect+' mg/dL',null,biliDate);
         }
       }
       var tp=rawText.match(/tempo de protrombina[\s\S]{0,500}?plasma examinado[^0-9]{0,30}(-?\d[\d.]*(?:,\d+)?)\s*segundos/i);
