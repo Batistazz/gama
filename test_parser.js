@@ -382,11 +382,46 @@ UROCULTURA COM ANTIBIOGRAMA
 Escherichia coli 100.000 UFC/mL`);
 check(mixed.accepted.length===1 && mixed.notices.some(n=>n.code==='culture') && mixed.kind==='mixed', 'documento misto importa seguro e sinaliza cultura manual');
 
+const urineMixed = P.triageConservative(`Controllab
+CONTROLE DE QUALIDADE
+PACIENTE: PACIENTE TESTE
+HEMOGRAMA COMPLETO
+COLETA: 25/08/2026
+HEMOGLOBINA: 12,1 g/dL
+PACIENTE: PACIENTE TESTE
+URINA TIPO 1 (URINA ROTINA)
+DATA COLETA: 25/08/2026
+MATERIAL: Urina Jato Médio
+MÉTODO: Fita Reagente / Microscopia Ótica
+VOLUME: 12 mL
+pH: 5,5
+GLICOSE: AUSENTE
+HEMOGLOBINA/HEMÁCIAS: AUSENTES
+LEUCÓCITOS: 11 POR CAMPO
+HEMÁCIAS: 2 POR CAMPO
+CÉLULAS EPITELIAIS: NUMEROSAS POR CAMPO
+PACIENTE: PACIENTE TESTE
+CREATININA
+DATA DA COLETA: 25/08/2026
+RESULTADO: 0,73 mg/dL
+PACIENTE: PACIENTE TESTE
+GRAM, Bacterioscopia
+Data Coleta: 25/08/2026
+Material: Urina
+Resultado: PRESENÇA DE NUMEROSOS BASTONETES GRAM NEGATIVO.`);
+check(urineMixed.accepted.some(r=>r.exam_name_normalized==='hemoglobina'&&r.value_numeric===12.1), 'hemoglobina do sangue continua entrando antes do EAS');
+check(urineMixed.accepted.some(r=>r.exam_name_normalized==='creatinina'&&r.value_numeric===0.73), 'exame de sangue após o EAS continua entrando');
+check(!urineMixed.accepted.some(r=>['ph','glicose','leucocitos','hemacias','bastoes'].includes(r.exam_name_normalized)&&/urina|por campo|gram negativo/i.test(r.source_text||'')), 'itens de Urina/EAS e Gram não entram como exames de sangue');
+check(!urineMixed.blocked.some(r=>['pH','Glicose','Hemoglobina','Leucócitos','Hemácias','Bastões','VOLUME','CÉLULAS EPITELIAIS'].includes(r.label)), 'EAS não gera alertas falsos por analito');
+check(urineMixed.notices.some(n=>n.code==='urinalysis'&&/Urina\/EAS identificada/.test(n.message)), 'Urina/EAS permanece visível como pendência clara');
+check(urineMixed.notices.some(n=>/Bacterioscopia\/Gram identificada/.test(n.message)), 'Bacterioscopia/Gram permanece visível como pendência clara');
+
 const qualitative = P.triageConservative('COLETA: 29/08/2026\nHemoglobina: negativo');
 check(qualitative.accepted.length===0 && qualitative.blocked.some(r=>r.reasons.includes('resultado não numérico')), 'resultado qualitativo não entra na grade');
 
 const implausibleSafe = P.triageConservative('COLETA: 29/08/2026\nPotássio: 61 mEq/L');
 check(implausibleSafe.accepted.length===0 && implausibleSafe.blocked.some(r=>r.reasons.some(x=>/plausível|fisiológica/.test(x))), 'valor implausível é bloqueado');
+check(implausibleSafe.blocked.every(r=>r.reasons.filter(x=>/faixa plausível/.test(x)).length<=1), 'alerta de faixa plausível não aparece duplicado');
 
 const noDate = P.triageConservative('Hemoglobina: 10,8 g/dL');
 const withFallback = P.triageConservative('Hemoglobina: 10,8 g/dL','2026-08-29T08:00:00.000Z');

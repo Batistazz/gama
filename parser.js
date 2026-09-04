@@ -589,15 +589,16 @@
     var gasometrySample = null;       // arterial | venous | null
     var bilirubinSection = false;
     var pendingSection = false;
+    var excludedLabSection = null;    // urinalysis | bacterioscopy | null
 
     function finalizeConfidence(r){
       var c = catByKey(r.exam_name_normalized);
       var conf = 'ok', motivos = [];
-      if(!c){ conf='warn'; motivos.push('exame fora do catálogo — confira'); }
+      if(!c){ conf='warn'; motivos.push('exame fora do catálogo'); }
       if(r.matched_symbol_only){ conf='warn'; motivos.push('reconhecido só por sigla'); }
       if(r.value_type==='numeric'){
-        if(c && c.unit && !r.unit){ conf='warn'; motivos.push('sem unidade'); }   // só cobra unidade de exame que tem unidade (INR não tem)
-        if(c && (r.value_numeric < c.plaus[0] || r.value_numeric > c.plaus[1])){ conf='warn'; motivos.push('valor fora da faixa fisiológica'); }
+        if(c && c.unit && !r.unit){ conf='warn'; motivos.push('unidade ausente'); }   // só cobra unidade de exame que tem unidade (INR não tem)
+        if(c && (r.value_numeric < c.plaus[0] || r.value_numeric > c.plaus[1])){ conf='warn'; motivos.push('valor fora da faixa plausível'); }
       }
       if(r.reference_min!=null && r.reference_max!=null && r.reference_min > r.reference_max){ conf='warn'; motivos.push('referência invertida'); r.reference_min=r.reference_max=null; }
       r.confidence = conf; r.confidence_reason = motivos.join('; ');
@@ -613,6 +614,22 @@
         if(/controle de qualidade|hemograma completo|gasometria\s+(?:arterial|venos[ao])/.test(ln)) pendingSection=false;
         else continue;
       }
+
+      // Urina/EAS e bacterioscopia têm rótulos que também existem no sangue
+      // (pH, glicose, hemoglobina, hemácias, leucócitos e bastões). Enquanto
+      // esses exames não tiverem quadro próprio, ignora a seção inteira para
+      // nunca misturá-los ao hemograma, à bioquímica ou à gasometria.
+      if(excludedLabSection && /^(?:controllab|controle de qualidade|paciente|solicitante)\b/.test(ln)) excludedLabSection=null;
+      if(/urina tipo 1|urina rotina|urinalise|elementos anormais.*sedimento|^eas(?:[^a-z]|$)/.test(ln)){
+        excludedLabSection='urinalysis'; current=null; continue;
+      }
+      if(/^(?:gram(?:\s*,|\s+-|\s+bacterioscopia)|bacterioscopia|coloracao pelo gram)/.test(ln)){
+        excludedLabSection='bacterioscopy'; current=null; continue;
+      }
+      if(!excludedLabSection && /fita reagente.*microscopia/.test(ln)){
+        excludedLabSection='urinalysis'; current=null; continue;
+      }
+      if(excludedLabSection) continue;
 
       // O painel de bilirrubinas traz três resultados seguidos de muitas faixas
       // pediátricas com os mesmos rótulos. Ele é extraído abaixo como bloco;
@@ -822,8 +839,10 @@
     // esse bloco antes de procurar exames laboratoriais realmente concluídos,
     // para não emitir ao mesmo tempo "pendente" e "fora do quadro".
     var completedText=t.replace(/(?:lista de exames pendentes|exames pendentes)[\s\S]*?(?=(?:controle de qualidade|hemograma completo|gasometria(?: arterial| venosa)?|coagulograma|bioquimica|bioquímica|$))/g,' ');
-    if(/urina tipo 1|urina rotina|bacterioscopia|coloracao pelo gram|coloração pelo gram/.test(completedText))
-      out.push({code:'other_lab',label:'Exame laboratorial fora do quadro',message:'Exame laboratorial fora do quadro identificado — não incluído.'});
+    if(/urina tipo 1|urina rotina|urinalise|elementos anormais.*sedimento|sedimentoscopia/.test(completedText))
+      out.push({code:'urinalysis',label:'Urina/EAS',message:'Urina/EAS identificada — exame não incluído no folhão; confira no laudo.'});
+    if(/bacterioscopia|coloracao pelo gram|coloração pelo gram/.test(completedText))
+      out.push({code:'other_lab',label:'Bacterioscopia/Gram',message:'Bacterioscopia/Gram identificada — exame não incluído no folhão; confira no laudo.'});
     return out;
   }
   function triageConservative(text, fallbackDateISO){
@@ -841,6 +860,7 @@
       if(c && !c.unit && r.unit) reasons.push('unidade incompatível');
       if(r.confidence!=='ok') reasons.push(r.confidence_reason||'extração incerta');
       if(c && isQuantitative && r.value_numeric!=null && (r.value_numeric<c.plaus[0] || r.value_numeric>c.plaus[1])) reasons.push('valor fora da faixa plausível');
+      reasons=reasons.filter(function(reason,index){return reasons.indexOf(reason)===index;});
       var dateISO=r.collection_dateISO||fallbackDateISO||parsed.dateISO||null;
       if(reasons.length){
         var sourceNorm=norm(r.source_text||'');
