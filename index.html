@@ -126,6 +126,13 @@
   #folhaLegend .sw.low,#folhaLegend .sw.high{background:#ececec;border-color:#000}
   #folhaLegend .sw.warn{background:#fff;border:2px solid #000}
 
+  /* Pendências detectadas na importação: persistem até correção ou conferência. */
+  .reviewcard{border:2px solid #000;background:#fff;color:#000}
+  .reviewcard h2{font-size:14px;margin:0 0 4px}
+  .reviewmeta{font-size:11.5px;color:#333;margin-bottom:7px}
+  .reviewitem{border-top:1px solid #000;padding:6px 0;font-size:12.5px}
+  .reviewitem ul{margin:4px 0 0 18px;padding:0}
+
   /* Cabeçalho de documento (só na impressão) */
   .print-only{display:none}
   .print-header .pline{font-size:12px;line-height:1.35}
@@ -158,6 +165,8 @@
     .folha td.grpv>span{color:#000!important}
     .legend{color:#000;margin-top:6px}
     .legend .sw{display:none}
+    .reviewcard{border:2px solid #000!important;background:#fff!important;color:#000!important}
+    .reviewmeta{color:#000!important}
     /* eventos preenchem o fim da folha em 2 colunas e transbordam pro verso */
     .evsec{column-count:2;column-gap:12px} .evsec h2{column-span:all;font-size:12px}
     .evcard{border:1px solid #000;padding:5px 7px;break-inside:avoid}
@@ -209,7 +218,6 @@
       </div>
       <div style="display:flex;gap:16px;margin-top:8px;border-top:1px solid var(--line2);padding-top:4px" class="noprint">
         <button class="btn tab active" data-tab="folhao">Painel</button>
-        <button class="btn tab" data-tab="exames">Exames por data</button>
         <button class="btn tab" data-tab="import">Importar exames</button>
         <button class="btn tab" data-tab="alteracoes">Alterações</button>
       </div>
@@ -217,6 +225,7 @@
 
     <!-- FOLHÃO -->
     <div class="tabview" id="tab-folhao">
+      <div id="importReviewBlock"></div>
       <div class="card noprint" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:9px 12px">
         <span class="small muted">Período:</span>
         <select id="fltPeriodo" class="sm"><option value="all">Desde admissão</option><option value="1">Últimas 24h</option><option value="2">Últimas 48h</option><option value="7">7 dias</option></select>
@@ -235,18 +244,6 @@
         </div>
       </div>
       <div id="eventsBlock"></div>
-    </div>
-
-    <!-- EXAMES POR DATA (arquivo, sem OCR) -->
-    <div class="tabview" id="tab-exames" style="display:none">
-      <div class="card noprint">
-        <h2>Exames por data</h2>
-        <p class="small muted">Arraste o <b>PDF</b> ou a <b>foto</b> do exame — fica guardado na <b>data da coleta</b>. Você não digita valor nenhum; só confirma a data (já vem sugerida). O arquivo fica <b>no seu navegador</b> (nada sai do aparelho).</p>
-        <div class="drop noprint" id="dropExame" style="margin-top:8px">Arraste o exame aqui, ou clique pra escolher (PDF ou foto)</div>
-        <input type="file" id="fileExame" accept="application/pdf,image/*" hidden>
-        <div id="examesMsg" style="margin-top:8px"></div>
-      </div>
-      <div id="examesBody" style="margin-top:10px"></div>
     </div>
 
     <!-- IMPORT -->
@@ -381,12 +378,6 @@ function renderPacientes(){
 document.getElementById('btnNovoPac').onclick=()=>{
   formModal({
     title:'Novo paciente', submitLabel:'Criar',
-    topHtml:`<label class="fld"><span>Colar dados do prontuário — opcional (eu preencho os campos abaixo)</span>
-        <textarea id="npPaste" style="min-height:88px" placeholder="Ex.:&#10;Paciente: JOÃO DA SILVA&#10;Sexo: Masculino&#10;Data de Nascimento: 12/03/1958&#10;Leito: 12A&#10;Data de Internação: 05/08/2026&#10;Setor: Clínica Médica"></textarea></label>
-      <div style="display:flex;gap:8px;align-items:center;margin:-2px 0 10px">
-        <button type="button" class="btn sm" id="npRead">Ler e preencher ↓</button>
-        <span id="npMsg" class="small muted"></span>
-      </div>`,
     fields:[
       {name:'name',label:'Nome',required:true,placeholder:'Nome do paciente'},
       {name:'sex',label:'Sexo',type:'select',value:'',options:SEX_OPTS},
@@ -395,21 +386,6 @@ document.getElementById('btnNovoPac').onclick=()=>{
       {name:'bed',label:'Leito'},
       {name:'unit',label:'Unidade / setor'}
     ],
-    afterRender:api=>{
-      document.getElementById('npRead').onclick=()=>{
-        const info=P.parsePatientInfo(document.getElementById('npPaste').value);
-        const got=[];
-        if(info.name){api.set('name',info.name);got.push('nome');}
-        if(info.sex){api.set('sex',info.sex);got.push('sexo');}
-        if(info.birth_date){api.set('birth',info.birth_date);got.push('nascimento');}
-        if(info.admission_date){api.set('adm',info.admission_date);got.push('admissão');}
-        if(info.bed){api.set('bed',info.bed);got.push('leito');}
-        if(info.unit){api.set('unit',info.unit);got.push('unidade');}
-        const msg=document.getElementById('npMsg');
-        if(got.length){ msg.textContent='Li: '+got.join(', ')+'. Confira e ajuste.'; msg.style.color='var(--ok)'; }
-        else { msg.textContent='Não reconheci nenhum campo — preencha manualmente.'; msg.style.color='var(--warn)'; }
-      };
-    },
     onSubmit:v=>{
       const p={id:uid(),name:v.name,birth_date:v.birth||null,sex:v.sex||null,created_at:new Date().toISOString()};
       DB.patients.push(p);
@@ -442,7 +418,6 @@ function setTab(t){
   document.querySelectorAll('.tabview').forEach(v=>v.style.display='none');
   document.getElementById('tab-'+t).style.display='block';
   if(t==='folhao')renderFolhao();
-  if(t==='exames')renderExames();
   if(t==='alteracoes')renderAlteracoes();
   if(t==='import')document.getElementById('importMsg').innerHTML='';
 }
@@ -504,6 +479,7 @@ function trend(series){
 /* ===================== Folhão ===================== */
 function renderFolhao(){
   renderPrintHeader();
+  renderImportReviews();
   renderEvents();
   const lg=document.getElementById('folhaLegend');
   const obsAll=encObs();
@@ -587,10 +563,50 @@ function cultureCard(ev){
 }
 function renderEvents(){
   const el=document.getElementById('eventsBlock'); if(!el)return;
-  const evs=encEvents().slice().sort((a,b)=>new Date(b.collection_datetime)-new Date(a.collection_datetime));
+  const evs=encEvents().filter(e=>e.kind==='culture').slice().sort((a,b)=>new Date(b.collection_datetime)-new Date(a.collection_datetime));
   if(!evs.length){ el.innerHTML=''; return; }
-  el.innerHTML='<div class="card evsec"><h2>Microbiologia (culturas)</h2>'+evs.map(ev=>ev.kind==='culture'?cultureCard(ev):'').join('')+'</div>';
+  el.innerHTML='<div class="card evsec"><h2>Microbiologia (culturas)</h2>'+evs.map(cultureCard).join('')+'</div>';
   el.querySelectorAll('[data-delev]').forEach(b=>b.onclick=()=>confirmModal({title:'Excluir resultado',message:'Excluir esta cultura?',danger:true,confirmLabel:'Excluir',onYes:()=>{ DB.events=DB.events.filter(e=>e.id!==b.dataset.delev); save(); renderEvents(); }}));
+}
+
+function syncImportReview(report,sourceName,dateISO){
+  if(!curEnc||!report)return false;
+  const blocked=(report.blocked||[]).filter(x=>!x.culture_artifact&&!x.pending_artifact).map(x=>({
+    label:x.label||x.key||'Item não identificado', reasons:(x.reasons||[]).slice()
+  }));
+  const notices=(report.notices||[]).map(n=>n.message).filter(Boolean);
+  if(!blocked.length&&!notices.length&&!(report.accepted||[]).length)notices.push('Nenhum resultado foi reconhecido ou importado. Confira este documento manualmente.');
+  const when=dateISO||report.dateISO||new Date().toISOString();
+  const source=(sourceName||'Texto colado').trim()||'Texto colado';
+  const key=P.norm(source)+'|'+String(when).slice(0,10);
+  const reviews=Array.isArray(curEnc.import_reviews)?curEnc.import_reviews:[];
+  curEnc.import_reviews=reviews.filter(r=>r.key!==key);
+  if(!blocked.length&&!notices.length)return false;
+  curEnc.import_reviews.push({id:uid(),key,source_name:source,collection_datetime:when,blocked,notices,created_at:new Date().toISOString()});
+  return true;
+}
+function renderImportReviews(){
+  const el=document.getElementById('importReviewBlock'); if(!el)return;
+  const reviews=curEnc&&Array.isArray(curEnc.import_reviews)?curEnc.import_reviews:[];
+  if(!reviews.length){el.innerHTML='';return;}
+  const ordered=reviews.slice().sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  const total=ordered.reduce((n,r)=>n+(r.blocked||[]).length+(r.notices||[]).length,0);
+  el.innerHTML=`<div class="card reviewcard">
+    <h2>⚠ Pendências detectadas na importação (${total})</h2>
+    <div class="reviewmeta">Estes itens foram reconhecidos no documento, mas não entraram no quadro. Confira no laudo; um item que não tenha sido reconhecido pelo leitor não pode aparecer automaticamente nesta lista.</div>
+    ${ordered.map(r=>`<div class="reviewitem">
+      <div><b>${escapeHtml(r.source_name||'Importação')}</b> · ${fmtDay(r.collection_datetime)}</div>
+      <ul>
+        ${(r.blocked||[]).map(x=>`<li><b>${escapeHtml(x.label||'Item')}</b>: ${escapeHtml((x.reasons||[]).join('; ')||'não importado por segurança')}</li>`).join('')}
+        ${(r.notices||[]).map(x=>`<li>${escapeHtml(x)}</li>`).join('')}
+      </ul>
+      <button class="btn sm ghost noprint" data-reviewdone="${escapeHtml(r.id)}">Marcar como conferido</button>
+    </div>`).join('')}
+  </div>`;
+  el.querySelectorAll('[data-reviewdone]').forEach(b=>b.onclick=()=>confirmModal({
+    title:'Pendência conferida?',message:'Remover este aviso do painel? Os resultados já importados não serão alterados.',confirmLabel:'Marcar como conferido',
+    onYes:()=>{curEnc.import_reviews=(curEnc.import_reviews||[]).filter(r=>r.id!==b.dataset.reviewdone);save();renderImportReviews();}
+  }));
 }
 
 /* ===================== Modal de célula (ver origem / editar) ===================== */
@@ -721,7 +737,7 @@ function renderPrintHeader(){
 }
 
 /* ===================== Importar ===================== */
-document.getElementById('btnProcess').onclick=()=>doProcess(document.getElementById('pasteArea').value);
+document.getElementById('btnProcess').onclick=()=>doProcess(document.getElementById('pasteArea').value,null,'Texto colado');
 function conservativeMessage(report,added,skipped,corrected){
   const parts=[];
   parts.push(`<b>${added} resultado(s) importado(s).</b>`);
@@ -748,12 +764,16 @@ function conservativeMessage(report,added,skipped,corrected){
       return `${groups[k].length} por ${names[k]}${shown?` (<b>${shown}${extra}</b>)`:''}`;
     });
     parts.push(`<b>${blocked.length} resultado(s) pendente(s) para conferência:</b> ${details.join('; ')}.`);
+  }else if((report.notices||[]).length){
+    parts.push('<b>Confira os itens informados acima.</b>');
+  }else if(!added){
+    parts.push('<b>Nenhum resultado foi reconhecido ou importado. Confira o documento manualmente.</b>');
   }else{
     parts.push('<b>0 resultados pendentes para conferência.</b>');
   }
   return parts.join(' ');
 }
-function doProcess(text,fallbackDateISO){
+function doProcess(text,fallbackDateISO,sourceName){
   if(!text||!text.trim()){ msgImport('warn','Cole algum texto primeiro.'); return; }
   if(!curEnc){ msgImport('warn','Paciente sem internação.'); return; }
   const report=P.triageConservative(text,fallbackDateISO);
@@ -761,14 +781,15 @@ function doProcess(text,fallbackDateISO){
     formModal({
       title:'Qual a data destes exames?', subtitle:'Não achei a data da coleta no documento. Esta data será usada no quadro.', submitLabel:'Usar esta data',
       fields:[{name:'d',label:'Data da coleta',type:'date',required:true,value:todayISOdate()}],
-      onSubmit:v=>{ closeModal(); doProcess(text,isoFromDateInput(v.d)); }
+      onSubmit:v=>{ closeModal(); doProcess(text,isoFromDateInput(v.d),sourceName); }
     });
     return;
   }
   if(!report.accepted.length){
-    const msg=conservativeMessage(report,0,0); msgImport('warn',msg); showToast(msg,'warn'); return;
+    syncImportReview(report,sourceName,fallbackDateISO||report.dateISO); save();
+    const msg=conservativeMessage(report,0,0); msgImport('warn',msg); showToast(msg,'warn'); setTab('folhao'); return;
   }
-  commitResults(report.accepted,fallbackDateISO||report.dateISO,report);
+  commitResults(report.accepted,fallbackDateISO||report.dateISO,report,sourceName);
 }
 function processCulture(text){
   const cult=P.parseCulture(text);
@@ -796,7 +817,7 @@ function commitCulture(cult,useISO){
   msgImport(cult.confidence==='warn'?'warn':'ok',msg); showToast(msg,cult.confidence==='warn'?'warn':'ok');
   setTab('folhao');
 }
-function commitResults(results,useISO,report){
+function commitResults(results,useISO,report,sourceName){
   let ok=0,warn=0,skipped=0,corrected=0; const datas=new Set();
   const signature=o=>[
     o.encounter_id,o.exam_name_normalized,o.collection_datetime,o.sample_type||'',o.value_type,
@@ -835,7 +856,7 @@ function commitResults(results,useISO,report){
     existing.add(sig); DB.observations.push(next);
     if(r.confidence==='warn')warn++; else ok++;
   });
-  save();
+  syncImportReview(report,sourceName,useISO); save();
   document.getElementById('pasteArea').value='';
   const dl=[...datas].sort();
   const quando = dl.length>1 ? (dl.length+' datas ('+dl.map(d=>d.slice(8,10)+'/'+d.slice(5,7)).join(', ')+')') : fmtDay(dl[0]||useISO);
@@ -849,7 +870,7 @@ function commitResults(results,useISO,report){
 }
 function msgImport(kind,html){ document.getElementById('importMsg').innerHTML=`<div class="banner ${kind}">${html}</div>`; }
 
-/* A aba Importar lê PDF laboratorial; a aba Exames por data arquiva o original. */
+/* A aba Importar lê o PDF laboratorial e coloca os resultados no folhão. */
 function wireDrop(dropId, inputId, handler, ariaLabel){
   const drop=document.getElementById(dropId), inp=document.getElementById(inputId);
   if(!drop||!inp) return;
@@ -886,11 +907,13 @@ async function importarArquivo(file){
     if(!text.trim()){ msgImport('warn','Não consegui ler este PDF.'); return; }
     const profile=P.assessHospitalLabText(text);
     if(!profile.accepted){
-      msgImport('warn','Este PDF não corresponde ao modelo KN/Controllab do hospital. Por segurança, nenhum resultado foi colocado no quadro.');
+      const warning='Este PDF não corresponde ao modelo KN/Controllab do hospital. Por segurança, nenhum resultado foi colocado no quadro.';
+      syncImportReview({accepted:[],blocked:[],notices:[{message:warning}],dateISO:P.detectDate(text)},file.name||'PDF do laboratório'); save();
+      msgImport('warn',warning); showToast(warning,'warn'); setTab('folhao');
       return;
     }
     if(ocrPages) msgImport('ok',`OCR concluído em ${ocrPages} página(s). Colocando os exames no quadro…`);
-    doProcess(text);
+    doProcess(text,null,file.name||'PDF do laboratório');
   }catch(e){ const msg='Não foi possível ler este PDF: '+escapeHtml(e.message); msgImport('warn',msg); showToast(msg,'warn'); }
 }
 let _ocrWorker=null, _ocrCtx='';
@@ -912,85 +935,12 @@ async function pageToCanvas(page,targetWidth){
   await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise; return canvas;
 }
 wireDrop('drop','filePdf',importarArquivo,'Escolher PDF do laboratório para importar');
-wireDrop('dropExame','fileExame',arquivarExame,'Escolher PDF ou foto para arquivar por data');
 
-/* ===================== Exames por data (arquivo — SEM ler número) ===================== */
-/* Arquivos (PDF/foto) são pesados → vão pro IndexedDB; só metadados no localStorage. */
+/* Compatibilidade com backups antigos que incluam arquivos arquivados no IndexedDB. */
 function idbOpen(){ return new Promise((res,rej)=>{ const r=indexedDB.open('gama_files',1); r.onupgradeneeded=()=>r.result.createObjectStore('files'); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
 async function idbSave(id,blob){ const db=await idbOpen(); return new Promise((res,rej)=>{ const t=db.transaction('files','readwrite'); t.objectStore('files').put(blob,id); t.oncomplete=()=>{db.close();res();}; t.onerror=()=>{db.close();rej(t.error);}; }); }
 async function idbGet(id){ const db=await idbOpen(); return new Promise((res,rej)=>{ const t=db.transaction('files','readonly'); const q=t.objectStore('files').get(id); q.onsuccess=()=>{const value=q.result;db.close();res(value);}; q.onerror=()=>{db.close();rej(q.error);}; }); }
-async function idbDel(id){ const db=await idbOpen(); return new Promise((res)=>{ const t=db.transaction('files','readwrite'); t.objectStore('files').delete(id); t.oncomplete=()=>{db.close();res();}; t.onerror=()=>{db.close();res();}; }); }
 async function idbClear(){ const db=await idbOpen(); return new Promise((res,rej)=>{ const t=db.transaction('files','readwrite'); t.objectStore('files').clear(); t.oncomplete=()=>{db.close();res();}; t.onerror=()=>{db.close();rej(t.error);}; }); }
-
-function examesMsg(kind,html){ const el=document.getElementById('examesMsg'); if(el)el.innerHTML=`<div class="banner ${kind}">${html}</div>`; }
-
-async function arquivarExame(file){
-  if(!curEnc){ examesMsg('warn','Selecione um paciente com internação antes.'); setTab('exames'); return; }
-  const isPdf = file.type==='application/pdf' || /\.pdf$/i.test(file.name);
-  const isImg = /^image\//.test(file.type) || /\.(png|jpe?g|webp|bmp|gif)$/i.test(file.name);
-  if(!isPdf && !isImg){ examesMsg('warn','Use PDF ou foto (JPG/PNG).'); setTab('exames'); return; }
-  // sugere a data: se o PDF tiver camada de texto, lê a data dele; senão, hoje. (NÃO lê valores.)
-  let dataISO = todayISOdate();
-  if(isPdf && window.pdfjsLib){
-    try{ const buf=await file.arrayBuffer(); const pdf=await pdfjsLib.getDocument({data:buf.slice(0)}).promise;
-      const tc=await (await pdf.getPage(1)).getTextContent(); const iso=P.detectDate(tc.items.map(i=>i.str).join(' '));
-      if(iso) dataISO=iso.slice(0,10);
-    }catch(e){}
-  }
-  const titulo=(file.name||'Exame').replace(/\.[^.]+$/,'').slice(0,60);
-  formModal({
-    title:'Arquivar exame', subtitle:'Só confirmo a data — não digito valor nenhum.', submitLabel:'Guardar',
-    fields:[ {name:'titulo',label:'Título',value:titulo}, {name:'data',label:'Data da coleta',type:'date',required:true,value:dataISO} ],
-    onSubmit: async v=>{
-      const fid=uid();
-      try{ await idbSave(fid,file); }
-      catch(e){ closeModal(); examesMsg('warn','Falha ao guardar o arquivo: '+escapeHtml(e.message)); return; }
-      DB.events.push({ id:uid(), patient_id:curPat.id, encounter_id:curEnc.id, kind:'exam_doc',
-        collection_datetime:isoFromDateInput(v.data), title:(v.titulo||'Exame').trim()||'Exame',
-        mime:file.type||(isPdf?'application/pdf':'image/*'), filename:file.name||'', file_id:fid,
-        created_at:new Date().toISOString() });
-      save(); closeModal(); setTab('exames');
-      examesMsg('ok','Exame guardado em <b>'+fmtDay(isoFromDateInput(v.data))+'</b>.');
-      showToast('Exame guardado em <b>'+fmtDay(isoFromDateInput(v.data))+'</b>.','ok');
-    }
-  });
-}
-
-function examDocs(){ return (DB.events||[]).filter(e=>e.kind==='exam_doc' && e.encounter_id===(curEnc&&curEnc.id)); }
-function renderExames(){
-  const el=document.getElementById('examesBody'); if(!el)return;
-  const docs=examDocs();
-  if(!docs.length){ el.innerHTML='<p class="muted">Nenhum exame arquivado ainda. Arraste o PDF/foto acima — ele fica guardado na data da coleta, sem você digitar nada.</p>'; return; }
-  const byDay={}; docs.forEach(d=>{ const k=(d.collection_datetime||'').slice(0,10); (byDay[k]=byDay[k]||[]).push(d); });
-  const days=Object.keys(byDay).sort().reverse();
-  el.innerHTML=days.map(day=>`<div class="card" style="margin-bottom:10px">
-    <h2 style="margin:0 0 4px;font-size:15px">${fmtDay(day)} <span class="small muted">· ${byDay[day].length} exame(s)</span></h2>
-    ${byDay[day].map(d=>`<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--line2)">
-      <span>📄 ${escapeHtml(d.title||'Exame')}</span><div class="grow"></div>
-      <button class="btn sm" data-open="${d.id}">Abrir</button>
-      <button class="btn sm ghost" data-delx="${d.id}">Excluir</button>
-    </div>`).join('')}</div>`).join('');
-  el.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>abrirExame(b.dataset.open));
-  el.querySelectorAll('[data-delx]').forEach(b=>b.onclick=()=>excluirExame(b.dataset.delx));
-}
-async function abrirExame(id){
-  const ev=examDocs().find(e=>e.id===id); if(!ev)return;
-  let blob; try{ blob=await idbGet(ev.file_id); }catch(e){}
-  if(!blob){ alert('Arquivo não encontrado neste navegador.'); return; }
-  const url=URL.createObjectURL(blob), isPdf=(ev.mime||'').indexOf('pdf')>=0;
-  openModal(`<h3 style="margin:0 0 8px">${escapeHtml(ev.title||'Exame')} — ${fmtDay(ev.collection_datetime)}</h3>
-    ${isPdf ? `<iframe src="${url}" style="width:100%;height:68vh;border:1px solid var(--line2);border-radius:8px"></iframe>`
-            : `<img src="${url}" style="max-width:100%;max-height:68vh;display:block;margin:0 auto;border:1px solid var(--line2);border-radius:8px">`}
-    <div style="display:flex;gap:8px;margin-top:10px">
-      <a class="btn sm" href="${url}" target="_blank" rel="noopener">Abrir em nova aba / imprimir</a>
-      <button class="btn sm ghost" id="xClose">Fechar</button></div>`,()=>URL.revokeObjectURL(url));
-  document.getElementById('xClose').onclick=closeModal;
-}
-function excluirExame(id){
-  const ev=examDocs().find(e=>e.id===id); if(!ev)return;
-  confirmModal({ title:'Excluir exame', message:'Remover este exame arquivado? Não dá pra desfazer.', danger:true, confirmLabel:'Excluir',
-    onYes:async()=>{ await idbDel(ev.file_id); DB.events=DB.events.filter(e=>e.id!==id); save(); renderExames(); } });
-}
 
 /* ===================== Alterações ===================== */
 function renderAlteracoes(){
@@ -1093,6 +1043,7 @@ function printBlank(){
   setTab('folhao'); renderPrintHeader();
   document.getElementById('folhaBody').innerHTML=renderBlankGrid()+renderBlankNotes();
   const ev=document.getElementById('eventsBlock'); if(ev) ev.innerHTML='';
+  const rev=document.getElementById('importReviewBlock'); if(rev) rev.innerHTML='';
   const lg=document.getElementById('folhaLegend'); if(lg) lg.style.display='none';
   window.onafterprint=function(){ window.onafterprint=null; renderFolhao(); };
   setTimeout(()=>window.print(),60);
