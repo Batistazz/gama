@@ -143,7 +143,7 @@
   @media print{
     @page{size:A4 landscape;margin:7mm}
     *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
-    header,.noprint,.btn{display:none!important}
+    header,.noprint,.btn,#importReviewBlock{display:none!important}
     body{background:#fff;color:#000} main{max-width:none;padding:0}
     .print-only{display:block}
     .screen-date{display:none!important}
@@ -613,10 +613,10 @@ function renderImportReviews(){
       <button class="btn sm ghost noprint" data-reviewdone="${escapeHtml(r.id)}">Marcar como conferido</button>
     </div>`).join('')}
   </div>`;
-  el.querySelectorAll('[data-reviewdone]').forEach(b=>b.onclick=()=>confirmModal({
-    title:'Pendência conferida?',message:'Remover este aviso do painel? Os resultados já importados não serão alterados.',confirmLabel:'Marcar como conferido',
-    onYes:()=>{curEnc.import_reviews=(curEnc.import_reviews||[]).filter(r=>r.id!==b.dataset.reviewdone);save();renderImportReviews();}
-  }));
+  el.querySelectorAll('[data-reviewdone]').forEach(b=>b.onclick=()=>{
+    curEnc.import_reviews=(curEnc.import_reviews||[]).filter(r=>r.id!==b.dataset.reviewdone);
+    save(); renderImportReviews(); showToast('Pendência marcada como conferida.','ok');
+  });
 }
 
 /* ===================== Modal de célula (ver origem / editar) ===================== */
