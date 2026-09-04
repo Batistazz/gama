@@ -48,26 +48,26 @@
   .pcard .mt{color:var(--muted);font-size:12px;margin-top:6px}
 
   /* Folhão */
-  .folha{overflow:auto;max-height:70vh}
+  .folha{overflow:auto;max-height:70vh;color:#000}
   .folha table{font-size:13px}
-  .folha th,.folha td{border:1px solid var(--line2);padding:5px 9px;text-align:center;white-space:nowrap}
-  .folha thead th{background:#eef4f5;color:var(--muted);font-weight:600;font-size:11.5px;position:sticky;top:0;z-index:3}
-  .folha th.ex,.folha td.ex{text-align:left;position:sticky;left:24px;background:var(--panel);z-index:2;min-width:150px}
+  .folha th,.folha td{border:1px solid #000;padding:5px 9px;text-align:center;white-space:nowrap;color:#000}
+  .folha thead th{background:#f0f0f0;color:#000;font-weight:600;font-size:11.5px;position:sticky;top:0;z-index:3}
+  .folha th.ex,.folha td.ex{text-align:left;position:sticky;left:24px;background:#fff;z-index:2;min-width:150px}
   .folha thead th.ex{z-index:4}
-  .folha td.ex{font-weight:600} .folha td.ex .u{color:var(--muted);font-weight:400;font-size:11px}
+  .folha td.ex{font-weight:600} .folha td.ex .u{color:#444;font-weight:400;font-size:11px}
   /* coluna vertical do grupo — substitui a faixa em branco que roubava linhas de exame */
-  .folha th.grpv,.folha td.grpv{position:sticky;left:0;z-index:2;width:24px;min-width:24px;max-width:24px;padding:0;background:#eef4f5;border-right:1px solid var(--line);overflow:hidden}
+  .folha th.grpv,.folha td.grpv{position:sticky;left:0;z-index:2;width:24px;min-width:24px;max-width:24px;padding:0;background:#f0f0f0;border-right:1px solid #000;overflow:hidden}
   .folha thead th.grpv{z-index:4}
-  .folha td.grpv>span{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(180deg);writing-mode:vertical-rl;white-space:nowrap;font-size:10px;letter-spacing:.4px;text-transform:uppercase;color:var(--accent2);font-weight:700;line-height:1;pointer-events:none}
-  td.cell{cursor:pointer;font-variant-numeric:tabular-nums;position:relative} td.cell:hover{outline:2px solid var(--accent);outline-offset:-2px}
-  td.empty{color:#c3ced2;cursor:pointer} td.empty:hover{outline:2px dashed var(--accent);outline-offset:-2px}
-  .low{background:var(--lowbg);color:var(--low);font-weight:700}
-  .high{background:var(--highbg);color:var(--high);font-weight:700}
-  .warncell{box-shadow:inset 0 0 0 2px var(--warn);background:var(--warnbg)}
+  .folha td.grpv>span{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(180deg);writing-mode:vertical-rl;white-space:nowrap;font-size:10px;letter-spacing:.4px;text-transform:uppercase;color:#000;font-weight:700;line-height:1;pointer-events:none}
+  td.cell{cursor:pointer;font-variant-numeric:tabular-nums;position:relative} td.cell:hover{outline:2px solid #000;outline-offset:-2px}
+  td.empty{color:#777;cursor:pointer} td.empty:hover{outline:2px dashed #000;outline-offset:-2px}
+  .folha .low,.folha .high{background:#ececec;color:#000;font-weight:700}
+  .folha .warncell{box-shadow:inset 0 0 0 2px #000;background:#fff}
   .obslist{display:flex;flex-direction:column;align-items:center;gap:2px}
-  .obsitem{display:inline-flex;align-items:center;justify-content:center;gap:3px;min-width:100%;border-radius:4px;padding:1px 3px}
+  .obsitem{display:inline-flex;align-items:center;justify-content:center;gap:3px;min-width:100%;border-radius:0;padding:1px 12px;position:relative}
   .obsitem .mk{position:static;margin-left:1px}
-  .sampletag{display:inline-block;border:1px solid currentColor;border-radius:8px;padding:0 4px;font-size:8px;font-weight:700;line-height:1.4;text-transform:uppercase;letter-spacing:.15px;color:var(--accent2);background:#fff}
+  .sampletag{display:inline-block;border:0;padding:0;font-size:8px;font-weight:800;line-height:1;text-transform:uppercase;color:#000;background:transparent}
+  .obsitem .sampletag{position:absolute;top:0;right:0;bottom:0;width:10px;border-left:1px solid #000;display:flex;align-items:center;justify-content:center}
   .mk{position:absolute;top:0;right:2px;font-size:8px;font-weight:700;line-height:1.1;opacity:.7;letter-spacing:-1px}   /* +/++ acima, −/−− abaixo — detalhe no canto */
   /* folha em branco (imprimir p/ preencher à mão) */
   .folha td.bk,.folha th.bk{min-width:64px}
@@ -78,8 +78,8 @@
   /* colunas em branco pra preencher à mão — só na impressão */
   .fillcol{display:none}
   /* tendência discreta no fim */
-  .folha th.tnd,.folha td.tnd{color:var(--muted);font-weight:600;font-size:12px}
-  .folha td.tnd.up{color:var(--high)} .folha td.tnd.down{color:var(--low)}
+  .folha th.tnd,.folha td.tnd{color:#000;font-weight:600;font-size:12px}
+  .folha td.tnd.up,.folha td.tnd.down{color:#000}
 
   /* Eventos: culturas (e futuramente imagem) — seção que flui abaixo da grade */
   .evsec h2{margin:0 0 8px}
@@ -123,6 +123,8 @@
   .legend .sw.low{background:var(--lowbg);border:1px solid var(--low)}
   .legend .sw.high{background:var(--highbg);border:1px solid var(--high)}
   .legend .sw.warn{background:var(--warnbg);border:1px solid var(--warn)}
+  #folhaLegend .sw.low,#folhaLegend .sw.high{background:#ececec;border-color:#000}
+  #folhaLegend .sw.warn{background:#fff;border:2px solid #000}
 
   /* Cabeçalho de documento (só na impressão) */
   .print-only{display:none}
@@ -150,7 +152,8 @@
     .folha thead th{background:#f0f0f0!important}
     .low,.high{background:#ececec!important;font-weight:700}   /* um único cinza p/ "anormal" */
     .warncell{box-shadow:none!important;background:#fff!important;outline:2px solid #000;outline-offset:-2px}
-    .sampletag{border:1px solid #000!important;color:#000!important;background:#fff!important}
+    .sampletag{border:0!important;color:#000!important;background:transparent!important}
+    .obsitem .sampletag{border-left:1px solid #000!important}
     .folha td.grpv{background:#e6e6e6!important}
     .folha td.grpv>span{color:#000!important}
     .legend{color:#000;margin-top:6px}
@@ -227,7 +230,7 @@
           <span class="noprint"><span class="sw high"></span>acima da referência (+/++)</span>
           <span class="noprint"><span class="sw low"></span>abaixo da referência (−/−−)</span>
           <span class="noprint"><span class="sw warn"></span>incerto (confira)</span>
-          <span>arterial/venosa = tipo da amostra</span>
+          <span>A = arterial · V = venosa</span>
           <span class="print-only">+/++ = acima · −/−− = abaixo (2 sinais = bem fora) · ▢ = incerto</span>
         </div>
       </div>
@@ -329,8 +332,10 @@ function obsDisplay(o){
   return escapeHtml(o.value_text||'—');
 }
 function sampleBadge(o){
-  const label=o.sample_type==='arterial'?'arterial':(o.sample_type==='venous'?'venosa':'');
-  return label?`<span class="sampletag">${label}</span>`:'';
+  const arterial=o.sample_type==='arterial';
+  const label=arterial?'A':(o.sample_type==='venous'?'V':'');
+  const title=arterial?'Amostra arterial':'Amostra venosa';
+  return label?`<span class="sampletag" title="${title}" aria-label="${title}">${label}</span>`:'';
 }
 function observationHtml(o){
   const ab=abnormal(o), cls=['obsitem'];
