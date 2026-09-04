@@ -135,26 +135,34 @@
 
   /* Cabeçalho de documento (só na impressão) */
   .print-only{display:none}
+  .print-date{display:none}
   .print-header .pline{font-size:12px;line-height:1.35}
   .print-header .pline b{font-size:15px}
   .print-header .gen{font-size:10px;color:#555;font-weight:400}
 
   @media print{
-    @page{size:A4 portrait;margin:8mm}
+    @page{size:A4 landscape;margin:7mm}
     *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
     header,.noprint,.btn{display:none!important}
     body{background:#fff;color:#000} main{max-width:none;padding:0}
     .print-only{display:block}
+    .screen-date{display:none!important}
+    .print-date{display:inline!important}
     .print-header{border-bottom:2px solid #000;padding-bottom:5px;margin-bottom:8px}
     .print-header .gen{color:#000}
     .card{border:none;padding:0;margin-bottom:8px}
     .folha{max-height:none;overflow:visible}
-    .folha table{font-size:11px}
+    .folha table{width:100%;font-size:9px;table-layout:auto}
     thead{display:table-header-group}
     tr{break-inside:avoid}
     /* P&B: significado nunca depende de cor — anormal = célula destacada (cinza+negrito). */
-    .folha th,.folha td{border:1px solid #000;color:#000!important;padding:2px 5px}
-    .fillcol{display:table-cell}   /* colunas em branco pra preencher à mão aparecem no papel */
+    .folha th,.folha td{border:1px solid #000;color:#000!important;padding:2px 3px;white-space:nowrap}
+    /* O navegador não deve levar o posicionamento "sticky" da tela para o papel. */
+    .folha th.ex,.folha td.ex,.folha th.grpv,.folha thead th{position:static!important;left:auto!important;top:auto!important}
+    .folha td.grpv{position:relative!important;left:auto!important;top:auto!important}
+    .folha th.ex,.folha td.ex{min-width:96px;max-width:140px;white-space:normal}
+    .folha th.grpv,.folha td.grpv{width:18px;min-width:18px}
+    .fillcol{display:none!important}   /* no folhão preenchido, não comprime datas reais com colunas extras */
     .nl{border-bottom:1px solid #000} .notes-h{color:#000}
     .folha thead th{background:#f0f0f0!important}
     .low,.high{background:#ececec!important;font-weight:700}   /* um único cinza p/ "anormal" */
@@ -225,7 +233,8 @@
 
     <!-- FOLHÃO -->
     <div class="tabview" id="tab-folhao">
-      <div id="importReviewBlock"></div>
+      <!-- pendência é painel de conferência na tela; a folha impressa não a leva -->
+      <div id="importReviewBlock" class="noprint"></div>
       <div class="card noprint" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:9px 12px">
         <span class="small muted">Período:</span>
         <select id="fltPeriodo" class="sm"><option value="all">Desde admissão</option><option value="1">Últimas 24h</option><option value="2">Últimas 48h</option><option value="7">7 dias</option></select>
@@ -309,6 +318,7 @@ const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 /* ===================== Utilidades ===================== */
 const dayKey=iso=>iso.slice(0,10);
 const fmtDay=iso=>{const s=String(iso||'');const m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);const d=m?new Date(+m[1],+m[2]-1,+m[3]):new Date(s);return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0');};
+const fmtGridDay=iso=>{const d=dayKey(iso);return d?`${d.slice(8,10)}/${d.slice(5,7)}/${d.slice(2,4)}`:'—';};
 const fmtTime=iso=>new Date(iso).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
 function fmtNum(n,dec){ if(n==null||isNaN(n))return'—'; return n.toLocaleString('pt-BR',{minimumFractionDigits:dec||0,maximumFractionDigits:dec||0}); }
 function obsDisplay(o){
@@ -515,7 +525,7 @@ function renderFolhao(){
 
   const NBLANK=4;   // colunas em branco (só impressão) p/ preencher à mão
   let h='<table><thead><tr><th class="grpv"></th><th class="ex">Exame</th>';
-  days.forEach(d=>h+=`<th>${fmtDay(d)}</th>`);
+  days.forEach(d=>h+=`<th><span class="screen-date">${fmtDay(d)}</span><span class="print-date">${fmtGridDay(d)}</span></th>`);
   for(let i=0;i<NBLANK;i++) h+='<th class="fillcol bk">&nbsp;</th>';
   h+='<th class="tnd">tend.</th></tr></thead><tbody>';
   groups.forEach(grp=>{
