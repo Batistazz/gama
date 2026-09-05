@@ -107,6 +107,12 @@
   .toast.show{display:block}
   .drop{border:2px dashed var(--line);border-radius:9px;padding:16px;text-align:center;color:var(--muted);cursor:pointer;font-size:13px}
   .drop.over{border-color:var(--accent);background:#eafafc;color:var(--tx)}
+  .portalstate{font-size:11.5px;color:var(--muted);width:100%;text-align:right}
+  .portalstate.ok{color:var(--ok)}
+  .jobbar{position:fixed;right:18px;bottom:18px;z-index:65;width:min(390px,calc(100vw - 36px));display:grid;gap:7px}
+  .jobitem{background:var(--panel);border:1px solid var(--line);border-left:5px solid var(--accent);border-radius:8px;padding:8px 10px;box-shadow:0 7px 24px rgba(0,0,0,.16);font-size:12px}
+  .jobitem.done{border-left-color:var(--ok)} .jobitem.error{border-left-color:var(--high)}
+  .jobitem b{display:block}.jobitem .muted{margin-top:2px}
 
   /* Modal */
   .modal-bg{position:fixed;inset:0;background:rgba(10,20,25,.4);display:none;align-items:center;justify-content:center;z-index:50}
@@ -206,7 +212,7 @@
       </div>
       <div id="plist" class="plist"></div>
     </div>
-    <p class="small muted">Tudo fica salvo neste navegador, só neste computador. Nada é enviado pra internet. Use <b>Backup</b> pra levar seus dados a outra máquina.</p>
+    <p class="small muted">Os dados e o vínculo do QR ficam salvos neste navegador e entram no <b>Backup</b>. Ao buscar exames, o Gama conversa diretamente com o portal oficial do laboratório.</p>
   </section>
 
   <!-- ===== PACIENTE ===== -->
@@ -220,9 +226,13 @@
           <div id="patSub" class="small muted"></div>
         </div>
         <div class="grow"></div>
+        <button class="btn sm ghost noprint" id="btnPortalLink">Ler QR do exame</button>
+        <button class="btn sm primary noprint" id="btnPortalSync" disabled>Buscar novos exames</button>
+        <input type="file" id="filePortalQr" accept="application/pdf,image/*" hidden>
         <button class="btn sm ghost noprint" id="btnEditPat">Editar</button>
         <button class="btn sm ghost noprint" id="btnBlank" title="Imprimir uma folha em branco com a lista padrão de exames, pra preencher à mão">Folha em branco</button>
         <button class="btn sm noprint" id="btnPrint">🖨 Imprimir</button>
+        <div id="portalState" class="portalstate"></div>
       </div>
       <div style="display:flex;gap:16px;margin-top:8px;border-top:1px solid var(--line2);padding-top:4px" class="noprint">
         <button class="btn tab active" data-tab="folhao">Painel</button>
@@ -259,7 +269,7 @@
     <div class="tabview" id="tab-import" style="display:none">
       <div class="card">
         <h2>Importar resultados</h2>
-        <p class="small muted">Escolha o <b>PDF KN/Controllab usado pelo hospital</b>. O Gama lê o arquivo, pega a data da coleta e coloca os resultados no quadro. Culturas e exames ainda sem resultado são apenas informados. Outros modelos ficam para uma etapa futura.</p>
+        <p class="small muted">Para automatizar, use <b>Ler QR do exame</b> no cabeçalho do paciente uma única vez. Depois, <b>Buscar novos exames</b> procura somente protocolos novos e 100% concluídos. O PDF abaixo continua disponível como alternativa manual.</p>
         <textarea id="pasteArea" placeholder="Ex.:
 Hemoglobina ......... 10,8 g/dL
 Valor de referência . 13,0 - 17,0
@@ -282,10 +292,13 @@ Potássio: 5,2 mEq/L"></textarea>
 
 <!-- MODAL célula -->
 <div class="toast banner ok" id="toast" role="status" aria-live="polite"></div>
+<div class="jobbar noprint" id="portalJobs" role="status" aria-live="polite"></div>
 <div class="modal-bg" id="modalBg"><div class="modal" id="modal" role="dialog" aria-modal="true"></div></div>
 
 <script src="vendor/tesseract/tesseract.min.js"></script>
 <script src="vendor/pdf.min.js"></script>
+<script src="vendor/jsQR.js"></script>
+<script src="portal.js?v=20260904-1"></script>
 <script src="parser.js?v=20260904-1"></script>
 <script>
 'use strict';
@@ -418,6 +431,7 @@ function openPaciente(id){
   document.getElementById('patNome').textContent=curPat.name;
   const age=ageFrom(curPat.birth_date), idp=[sexShort(curPat.sex),age!=null?age+'a':''].filter(Boolean).join('·');
   document.getElementById('patSub').textContent=(idp?idp+' · ':'')+(curEnc?('D'+diasInternacao(curEnc)+' de internação · admissão '+fmtDay(curEnc.admission_date)+(curEnc.bed?(' · leito '+curEnc.bed):'')):'sem internação');
+  renderPortalControls();
   renderPrintHeader();
   setTab('folhao'); show('paciente');
 }
@@ -579,8 +593,9 @@ function renderEvents(){
   el.querySelectorAll('[data-delev]').forEach(b=>b.onclick=()=>confirmModal({title:'Excluir resultado',message:'Excluir esta cultura?',danger:true,confirmLabel:'Excluir',onYes:()=>{ DB.events=DB.events.filter(e=>e.id!==b.dataset.delev); save(); renderEvents(); }}));
 }
 
-function syncImportReview(report,sourceName,dateISO){
-  if(!curEnc||!report)return false;
+function syncImportReview(report,sourceName,dateISO,targetEncounter,sourceProtocol){
+  const encounter=targetEncounter||curEnc;
+  if(!encounter||!report)return false;
   const blocked=(report.blocked||[]).filter(x=>!x.culture_artifact&&!x.pending_artifact).map(x=>({
     label:x.label||x.key||'Item não identificado', reasons:(x.reasons||[]).slice()
   }));
@@ -588,11 +603,11 @@ function syncImportReview(report,sourceName,dateISO){
   if(!blocked.length&&!notices.length&&!(report.accepted||[]).length)notices.push('Nenhum resultado foi reconhecido ou importado. Confira este documento manualmente.');
   const when=dateISO||report.dateISO||new Date().toISOString();
   const source=(sourceName||'Texto colado').trim()||'Texto colado';
-  const key=P.norm(source)+'|'+String(when).slice(0,10);
-  const reviews=Array.isArray(curEnc.import_reviews)?curEnc.import_reviews:[];
-  curEnc.import_reviews=reviews.filter(r=>r.key!==key);
+  const key=sourceProtocol?('portal|'+sourceProtocol):(P.norm(source)+'|'+String(when).slice(0,10));
+  const reviews=Array.isArray(encounter.import_reviews)?encounter.import_reviews:[];
+  encounter.import_reviews=reviews.filter(r=>r.key!==key);
   if(!blocked.length&&!notices.length)return false;
-  curEnc.import_reviews.push({id:uid(),key,source_name:source,collection_datetime:when,blocked,notices,created_at:new Date().toISOString()});
+  encounter.import_reviews.push({id:uid(),key,source_name:source,source_protocol:sourceProtocol||null,collection_datetime:when,blocked,notices,created_at:new Date().toISOString()});
   return true;
 }
 function renderImportReviews(){
@@ -746,6 +761,196 @@ function renderPrintHeader(){
   el.innerHTML=`<div class="pline"><b>${escapeHtml(curPat.name||'—')}</b>${parts.length?' · '+escapeHtml(parts.join(' · ')):''} <span class="gen">· ${gen}</span></div>`;
 }
 
+/* ===================== Portal do laboratório por QR ===================== */
+const PORTAL=window.PortalLab;
+const portalJobs=new Map();
+function portalJobKey(patientId,encounterId){return patientId+'|'+encounterId;}
+function renderPortalJobs(){
+  const el=document.getElementById('portalJobs'); if(!el)return;
+  el.innerHTML=[...portalJobs.values()].map(j=>`<div class="jobitem ${j.kind||''}"><b>${escapeHtml(j.patientName||'Paciente')}</b><div>${escapeHtml(j.message||'Aguarde…')}</div>${j.detail?`<div class="muted">${escapeHtml(j.detail)}</div>`:''}</div>`).join('');
+}
+function setPortalJob(jobKey,patch){
+  const job=Object.assign(portalJobs.get(jobKey)||{},patch||{}); portalJobs.set(jobKey,job); renderPortalJobs();
+  if(curPat&&curEnc&&jobKey===portalJobKey(curPat.id,curEnc.id))renderPortalControls();
+  return job;
+}
+function finishPortalJob(jobKey,kind,message,detail){
+  const current=portalJobs.get(jobKey)||{};
+  setPortalJob(jobKey,{...current,kind,message,detail,finished:true});
+  setTimeout(()=>{ const j=portalJobs.get(jobKey); if(j&&j.finished){portalJobs.delete(jobKey);renderPortalJobs();renderPortalControls();} },12000);
+}
+function renderPortalControls(){
+  const link=document.getElementById('btnPortalLink'),sync=document.getElementById('btnPortalSync'),state=document.getElementById('portalState');
+  if(!link||!sync||!state)return;
+  const access=curPat&&curPat.portal_access,job=curPat&&curEnc&&portalJobs.get(portalJobKey(curPat.id,curEnc.id));
+  link.textContent=access?'Trocar QR':'Ler QR do exame';
+  sync.disabled=!access||!curEnc||!!(job&&!job.finished);
+  if(job&&!job.finished){ state.className='portalstate'; state.textContent=job.message||'Buscando exames…'; return; }
+  if(!access){ state.className='portalstate'; state.textContent='Leia o QR de um laudo uma vez; depois use “Buscar novos exames”.'; return; }
+  const last=access.last_sync_at?new Date(access.last_sync_at).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'ainda não realizada';
+  state.className='portalstate ok'; state.textContent=`Portal vinculado a ${access.portal_name||'este paciente'} · última busca: ${last}`;
+}
+function base64PdfBytes(value){
+  const clean=String(value||'').replace(/\s+/g,''),binary=atob(clean),bytes=new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+  return bytes;
+}
+function qrFromCanvas(canvas){
+  if(!window.jsQR)throw new Error('O leitor de QR não carregou.');
+  const ctx=canvas.getContext('2d',{willReadFrequently:true}),image=ctx.getImageData(0,0,canvas.width,canvas.height);
+  const found=jsQR(image.data,image.width,image.height,{inversionAttempts:'attemptBoth'});
+  return found&&found.data;
+}
+async function qrFromFile(file,onProgress){
+  const isPdf=file.type==='application/pdf'||/\.pdf$/i.test(file.name||'');
+  if(isPdf){
+    if(!window.pdfjsLib)throw new Error('O leitor de PDF não carregou.');
+    const pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise;
+    const limit=Math.min(3,pdf.numPages);
+    for(let pageNo=1;pageNo<=limit;pageNo++){
+      onProgress&&onProgress(`Lendo o QR — página ${pageNo}/${limit}…`);
+      const page=await pdf.getPage(pageNo),canvas=await pageToCanvas(page,1900),value=qrFromCanvas(canvas);
+      canvas.width=canvas.height=1;
+      if(value)return value;
+    }
+    throw new Error('Não encontrei um QR do portal nas três primeiras páginas.');
+  }
+  if(!/^image\//i.test(file.type||''))throw new Error('Escolha um PDF ou uma foto do QR.');
+  onProgress&&onProgress('Lendo o QR da imagem…');
+  const bitmap=await createImageBitmap(file),scale=Math.min(1,2200/Math.max(bitmap.width,bitmap.height));
+  const canvas=document.createElement('canvas'); canvas.width=Math.max(1,Math.round(bitmap.width*scale)); canvas.height=Math.max(1,Math.round(bitmap.height*scale));
+  canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height); bitmap.close&&bitmap.close();
+  const value=qrFromCanvas(canvas); canvas.width=canvas.height=1;
+  if(!value)throw new Error('Não encontrei um QR legível nesta imagem.');
+  return value;
+}
+async function portalPdfText(pdfBase64,onProgress){
+  const pdf=await pdfjsLib.getDocument({data:base64PdfBytes(pdfBase64)}).promise;
+  if(pdf.numPages>30)throw new Error('O laudo deste protocolo tem páginas demais para leitura automática.');
+  const lines=[]; let ocrPages=0;
+  for(let pageNo=1;pageNo<=pdf.numPages;pageNo++){
+    onProgress&&onProgress(`lendo página ${pageNo}/${pdf.numPages}`);
+    const page=await pdf.getPage(pageNo),tc=await page.getTextContent(),byY={};
+    tc.items.forEach(it=>{const y=Math.round(it.transform[5]);(byY[y]=byY[y]||[]).push({x:it.transform[4],s:it.str});});
+    const pageLines=[];Object.keys(byY).sort((a,b)=>b-a).forEach(y=>pageLines.push(byY[y].sort((a,b)=>a.x-b.x).map(x=>x.s).join(' ')));
+    if(pageLines.join('').replace(/\s/g,'').length>=20)lines.push(...pageLines);
+    else{
+      ocrPages++; _ocrCtx=`Lendo página ${pageNo}/${pdf.numPages}`;
+      const canvas=await pageToCanvas(page,1800),txt=await ocrCanvas(canvas); lines.push(...txt.split(/\r?\n/)); canvas.width=canvas.height=1;
+    }
+    await new Promise(resolve=>setTimeout(resolve,0));
+  }
+  return {text:lines.join('\n'),ocrPages};
+}
+function portalProtocolISO(protocol){
+  const raw=protocol&&(protocol.dataHoraSolicitacao||protocol.dataHora||protocol.dataSolicitacao);
+  if(!raw)return null;
+  const br=String(raw).match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if(br){const year=br[3].length===2?'20'+br[3]:br[3];return new Date(+year,+br[2]-1,+br[1],+(br[4]||8),+(br[5]||0),+(br[6]||0)).toISOString();}
+  const date=new Date(raw); return Number.isNaN(date.getTime())?null:date.toISOString();
+}
+function askPortalPatientMismatch(localName,portalName){
+  return new Promise(resolve=>{
+    let decided=false;
+    openModal(`<h3>Confira o paciente do QR</h3><p class="small" style="margin:7px 0">A folha aberta é <b>${escapeHtml(localName)}</b>, mas o portal informou <b>${escapeHtml(portalName)}</b>.</p><p class="small muted">Continuar pode colocar exames na pessoa errada.</p><div style="display:flex;gap:8px;margin-top:12px"><button class="btn sm" id="portalMismatchYes">Vincular mesmo assim</button><button class="btn primary sm" id="portalMismatchNo">Cancelar</button></div>`,()=>{if(!decided)resolve(false);});
+    document.getElementById('portalMismatchNo').onclick=()=>closeModal();
+    document.getElementById('portalMismatchYes').onclick=()=>{decided=true;closeModal();resolve(true);};
+  });
+}
+function protocolRecord(encounter,protocol){
+  const code=PORTAL.normalizeProtocol(protocol.codigo),version=PORTAL.protocolVersion(protocol);
+  return (encounter.portal_protocols||[]).find(x=>x.protocol===code&&x.version===version);
+}
+function rememberProtocol(encounter,protocol,stats){
+  const code=PORTAL.normalizeProtocol(protocol.codigo),version=PORTAL.protocolVersion(protocol),items=Array.isArray(encounter.portal_protocols)?encounter.portal_protocols:[];
+  encounter.portal_protocols=items.filter(x=>!(x.protocol===code&&x.version===version));
+  encounter.portal_protocols.push({protocol:code,version,processed_at:new Date().toISOString(),added:stats.added||0,pending:stats.pending||0});
+}
+async function runPortalSync(patientId,encounterId,prepared){
+  const patient=DB.patients.find(p=>p.id===patientId),encounter=DB.encounters.find(e=>e.id===encounterId);
+  if(!patient||!encounter)throw new Error('A folha do paciente não está mais disponível.');
+  const key=portalJobKey(patientId,encounterId),access=(prepared&&prepared.access)||patient.portal_access;
+  if(!access||!access.code||!access.password)throw new Error('Leia novamente o QR deste paciente.');
+  let job=portalJobs.get(key);
+  if(job&&!job.finished&&!(prepared&&prepared.reuseJob)){showToast('A busca deste paciente já está em andamento.','warn');return;}
+  setPortalJob(key,{patientName:patient.name,kind:'',finished:false,message:'Entrando no portal…',detail:'Você pode abrir outro paciente.'});
+  try{
+    const client=(prepared&&prepared.client)||new PORTAL.Client(access);
+    if(!prepared||!prepared.client)await client.authenticate();
+    const remote=(prepared&&prepared.remote)||await client.patient(),remoteName=remote.NomePaciente||remote.Nome||access.portal_name||'';
+    if(access.portal_name&&PORTAL.normalizeName(access.portal_name)!==PORTAL.normalizeName(remoteName))throw new Error('O QR passou a abrir outro paciente. Leia o QR novamente.');
+    const start=new Date(encounter.admission_date||Date.now()-365*86400000); start.setDate(start.getDate()-2);
+    const end=new Date(); end.setDate(end.getDate()+1);
+    setPortalJob(key,{message:'Procurando protocolos concluídos…'});
+    const protocols=await client.protocols(remote,start,end),completed=protocols.filter(PORTAL.isComplete),waiting=protocols.filter(x=>!PORTAL.isComplete(x)&&String(x.visualizadoPaciente||'').toLowerCase()!=='expirado').length;
+    const pending=completed.filter(p=>!protocolRecord(encounter,p));
+    if(!pending.length){
+      patient.portal_access.last_sync_at=new Date().toISOString(); patient.portal_access.last_summary=`Nenhum protocolo novo · ${waiting} aguardando conclusão`; save();
+      finishPortalJob(key,'done','Nenhum exame novo.',waiting?`${waiting} protocolo(s) ainda não estão 100% concluídos.`:'Tudo já estava atualizado.');
+      if(curPat&&curPat.id===patientId){renderPortalControls();renderFolhao();}
+      return;
+    }
+    let added=0,skipped=0,corrected=0,review=0,failed=0;
+    for(let index=0;index<pending.length;index++){
+      const protocol=pending[index],code=PORTAL.normalizeProtocol(protocol.codigo);
+      setPortalJob(key,{message:`Protocolo ${index+1}/${pending.length} · ${code}`,detail:'Baixando o laudo…'});
+      try{
+        const pdf=await client.pdf(remote,protocol),extracted=await portalPdfText(pdf,detail=>setPortalJob(key,{detail}));
+        if(!extracted.text.trim())throw new Error('O PDF veio sem texto legível.');
+        const profile=P.assessHospitalLabText(extracted.text),fallback=portalProtocolISO(protocol);
+        let stats;
+        if(!profile.accepted){
+          const warning='Este laudo do portal não correspondeu ao modelo automático. Confira o PDF manualmente.';
+          const report={accepted:[],blocked:[],notices:[{message:warning}],dateISO:P.detectDate(extracted.text)};
+          syncImportReview(report,'Portal '+code,fallback||report.dateISO,encounter,code); stats={added:0,skipped:0,corrected:0,pending:1};
+        }else{
+          const report=P.triageConservative(extracted.text,fallback);
+          stats=report.accepted.length?commitResults(report.accepted,fallback||report.dateISO,report,'Portal '+code,{patient,encounter,sourceProtocol:code,silent:true}):{added:0,skipped:0,corrected:0,pending:(report.blocked||[]).length+(report.notices||[]).length};
+          if(!report.accepted.length)syncImportReview(report,'Portal '+code,fallback||report.dateISO,encounter,code);
+        }
+        added+=stats.added||0; skipped+=stats.skipped||0; corrected+=stats.corrected||0; review+=stats.pending||0;
+        rememberProtocol(encounter,protocol,stats); save();
+      }catch(error){ failed++; setPortalJob(key,{detail:`Falha no protocolo ${code}; ele será tentado novamente depois.`}); }
+      await new Promise(resolve=>setTimeout(resolve,0));
+    }
+    patient.portal_access.last_sync_at=new Date().toISOString();
+    patient.portal_access.last_summary=`${pending.length-failed} protocolo(s) · ${added} resultado(s) novo(s) · ${review} pendência(s)`; save();
+    const result=`${added} resultado(s) importado(s) de ${pending.length-failed} protocolo(s).`;
+    const detail=[skipped?`${skipped} duplicado(s) ignorado(s)`:null,corrected?`${corrected} corrigido(s)`:null,review?`${review} pendência(s) para conferir`:null,waiting?`${waiting} protocolo(s) aguardando 100%`:null,failed?`${failed} falha(s) serão tentadas novamente`:null].filter(Boolean).join(' · ');
+    finishPortalJob(key,failed?'error':'done',result,detail||'Folhão atualizado.');
+    renderPacientes();
+    if(curPat&&curPat.id===patientId){renderPortalControls();renderFolhao();renderImportReviews();}
+  }catch(error){
+    finishPortalJob(key,'error','Não consegui atualizar os exames.',error.message||'Falha inesperada no portal.');
+    if(curPat&&curPat.id===patientId)renderPortalControls();
+  }
+}
+async function linkPortalFromFile(file,patientId,encounterId){
+  const patient=DB.patients.find(p=>p.id===patientId),encounter=DB.encounters.find(e=>e.id===encounterId); if(!patient||!encounter)return;
+  const key=portalJobKey(patientId,encounterId);
+  if(portalJobs.has(key)&&!portalJobs.get(key).finished){showToast('Já existe uma busca para este paciente.','warn');return;}
+  setPortalJob(key,{patientName:patient.name,kind:'',finished:false,message:'Lendo o QR do exame…',detail:'Você pode continuar usando outra folha.'});
+  try{
+    const raw=await qrFromFile(file,message=>setPortalJob(key,{message})),access=PORTAL.parseQrUrl(raw),client=new PORTAL.Client(access);
+    setPortalJob(key,{message:'Conferindo o paciente no portal…'}); await client.authenticate(); const remote=await client.patient(),remoteName=remote.NomePaciente||remote.Nome||'';
+    if(!PORTAL.samePatientName(patient.name,remoteName)){
+      const allowed=await askPortalPatientMismatch(patient.name,remoteName||'nome não informado');
+      if(!allowed){finishPortalJob(key,'error','Vínculo cancelado.','O QR não foi associado a esta folha.');return;}
+    }
+    patient.portal_access={code:access.code,password:access.password,portal_name:remoteName,linked_at:new Date().toISOString(),last_sync_at:null,last_summary:''}; save();
+    if(curPat&&curPat.id===patientId)renderPortalControls();
+    await runPortalSync(patientId,encounterId,{access:patient.portal_access,client,remote,reuseJob:true});
+  }catch(error){ finishPortalJob(key,'error','Não consegui ler ou vincular o QR.',error.message||'Falha inesperada.'); }
+}
+document.getElementById('btnPortalLink').onclick=()=>{
+  if(!curPat||!curEnc)return; const input=document.getElementById('filePortalQr'); input.dataset.patientId=curPat.id; input.dataset.encounterId=curEnc.id; input.click();
+};
+document.getElementById('filePortalQr').onchange=e=>{
+  const input=e.target,file=input.files&&input.files[0],patientId=input.dataset.patientId,encounterId=input.dataset.encounterId; input.value='';
+  if(file)linkPortalFromFile(file,patientId,encounterId);
+};
+document.getElementById('btnPortalSync').onclick=()=>{if(curPat&&curEnc)runPortalSync(curPat.id,curEnc.id);};
+
 /* ===================== Importar ===================== */
 document.getElementById('btnProcess').onclick=()=>doProcess(document.getElementById('pasteArea').value,null,'Texto colado');
 function conservativeMessage(report,added,skipped,corrected){
@@ -827,33 +1032,48 @@ function commitCulture(cult,useISO){
   msgImport(cult.confidence==='warn'?'warn':'ok',msg); showToast(msg,cult.confidence==='warn'?'warn':'ok');
   setTab('folhao');
 }
-function commitResults(results,useISO,report,sourceName){
+function commitResults(results,useISO,report,sourceName,options){
+  options=options||{};
+  const patient=options.patient||curPat,encounter=options.encounter||curEnc,sourceProtocol=options.sourceProtocol||null;
+  if(!patient||!encounter)return {added:0,warn:0,skipped:0,corrected:0,pending:0};
   let ok=0,warn=0,skipped=0,corrected=0; const datas=new Set();
   const signature=o=>[
+    o.encounter_id,o.exam_name_normalized,o.collection_datetime,o.sample_type||'',o.value_type,
+    o.value_numeric==null?'':String(o.value_numeric),o.value_text||'',o.unit||'',o.source_protocol||''
+  ].join('\u001f');
+  const signatureWithoutProtocol=o=>[
     o.encounter_id,o.exam_name_normalized,o.collection_datetime,o.sample_type||'',o.value_type,
     o.value_numeric==null?'':String(o.value_numeric),o.value_text||'',o.unit||''
   ].join('\u001f');
   const sourceIdentity=o=>{
     const source=P.norm(o.source_text||'').replace(/\s+/g,' ').trim();
     if(!source)return null;
-    return [o.encounter_id,o.exam_name_normalized,dayKey(o.collection_datetime),o.sample_type||'',source].join('\u001f');
+    return [o.encounter_id,o.exam_name_normalized,dayKey(o.collection_datetime),o.sample_type||'',o.source_protocol||'',source].join('\u001f');
   };
-  const existing=new Set(DB.observations.filter(o=>o.encounter_id===curEnc.id).map(signature));
+  const encounterObservations=()=>DB.observations.filter(o=>o.encounter_id===encounter.id);
+  const existing=new Set(encounterObservations().map(signature));
   results.forEach(r=>{
     const iso=r.collection_dateISO||useISO; datas.add(iso.slice(0,10));
-    const next={id:uid(),patient_id:curPat.id,encounter_id:curEnc.id,category:'laboratory',
+    const next={id:uid(),patient_id:patient.id,encounter_id:encounter.id,category:'laboratory',
       exam_name_original:r.exam_name_original,exam_name_normalized:r.exam_name_normalized,
       value_type:r.value_type,value_numeric:r.value_numeric,value_text:r.value_text,unit:r.unit||(P.catByKey(r.exam_name_normalized)||{}).unit,
       reference_min:r.reference_min,reference_max:r.reference_max,reference_text:r.reference_text,
       collection_datetime:iso,sample_type:r.sample_type||null,source_type:'import',source_text:r.source_text,confidence:r.confidence,confidence_reason:r.confidence_reason,
-      ocr_correction:r.ocr_correction||null,source_profile:r.source_profile||null,import_version:'20260903-1',
+      ocr_correction:r.ocr_correction||null,source_profile:r.source_profile||null,source_protocol:sourceProtocol,import_version:'20260904-portal-1',
       created_at:new Date().toISOString()};
     const sig=signature(next);
+    // Se o mesmo laudo já entrou manualmente, vinculamos a leitura antiga ao
+    // protocolo em vez de criar uma cópia. Protocolos diferentes continuam
+    // independentes, mesmo quando têm data e valor iguais.
+    if(sourceProtocol){
+      const legacy=encounterObservations().find(o=>o.source_type==='import'&&!o.source_protocol&&signatureWithoutProtocol(o)===signatureWithoutProtocol(next));
+      if(legacy){ legacy.source_protocol=sourceProtocol; legacy.portal_imported_at=new Date().toISOString(); existing.add(signature(legacy)); skipped++; return; }
+    }else if(encounterObservations().some(o=>signatureWithoutProtocol(o)===signatureWithoutProtocol(next))){ skipped++; return; }
     // Reprocessar o mesmo laudo deve corrigir a leitura anterior, não empilhar
     // dois valores para a mesma linha-fonte. Resultados manuais nunca entram
     // nesta substituição.
     const sid=sourceIdentity(next);
-    const priorSameSource=sid?DB.observations.filter(o=>o.source_type==='import'&&sourceIdentity(o)===sid):[];
+    const priorSameSource=sid?encounterObservations().filter(o=>o.source_type==='import'&&sourceIdentity(o)===sid):[];
     const alreadyExact=priorSameSource.some(o=>signature(o)===sig);
     const outdated=priorSameSource.filter(o=>signature(o)!==sig);
     if(outdated.length){
@@ -866,8 +1086,8 @@ function commitResults(results,useISO,report,sourceName){
     existing.add(sig); DB.observations.push(next);
     if(r.confidence==='warn')warn++; else ok++;
   });
-  syncImportReview(report,sourceName,useISO); save();
-  document.getElementById('pasteArea').value='';
+  syncImportReview(report,sourceName,useISO,encounter,sourceProtocol); save();
+  const paste=document.getElementById('pasteArea'); if(paste&&!options.silent)paste.value='';
   const dl=[...datas].sort();
   const quando = dl.length>1 ? (dl.length+' datas ('+dl.map(d=>d.slice(8,10)+'/'+d.slice(5,7)).join(', ')+')') : fmtDay(dl[0]||useISO);
   const added=ok+warn;
@@ -875,8 +1095,8 @@ function commitResults(results,useISO,report,sourceName){
     ? `${added} resultado(s) adicionado(s) em ${quando}.${skipped?' '+skipped+' duplicado(s) ignorado(s).':''}`
     : `Nenhum resultado novo: ${skipped} duplicado(s) já estava(m) na grade.`);
   const hasManual=report&&((report.blocked||[]).length||(report.notices||[]).length);
-  msgImport(hasManual?'warn':'ok',msg); showToast(msg,hasManual?'warn':'ok');
-  setTab('folhao');
+  if(!options.silent){ msgImport(hasManual?'warn':'ok',msg); showToast(msg,hasManual?'warn':'ok'); setTab('folhao'); }
+  return {added,warn,skipped,corrected,pending:report?((report.blocked||[]).length+(report.notices||[]).length):0,message:msg};
 }
 function msgImport(kind,html){ document.getElementById('importMsg').innerHTML=`<div class="banner ${kind}">${html}</div>`; }
 
