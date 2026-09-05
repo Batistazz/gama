@@ -69,6 +69,24 @@ Object.keys(esperado).forEach(k=>{
 check(out.results.length===8, 'exatamente 8 resultados (veio '+out.results.length+')');
 console.log(`  extraídos: ${out.results.map(r=>r.exam_name_normalized+'='+ (r.value_numeric)).join(', ')}`);
 
+console.log('== perfil hospitalar em painel curto ==');
+const painelCurto=`SANTA CASA
+CONTROLE DE QUALIDADE
+FÓSFORO
+DATA DA COLETA.: 19/08/2026
+MATERIAL.......: Sangue
+RESULTADO......: 2,5 mg/dL
+VALOR DE REFERÊNCIA: Adultos: 2,3 a 4,7 mg/dL
+MAGNÉSIO
+DATA DA COLETA.: 19/08/2026
+RESULTADO......: 2,40 mg/dL
+VALOR DE REFERÊNCIA: Adultos: 1,6 a 2,6 mg/dL
+RUA MARIA GERTRUDES DOS SANTOS, 218`;
+check(P.assessHospitalLabText(painelCurto).accepted,'aceita formulário hospitalar curto sem hemograma/coagulograma');
+const curto=P.triageConservative(painelCurto);
+check(get(curto.accepted,'fosforo')?.value_numeric===2.5,'painel curto extrai fósforo 2,5');
+check(get(curto.accepted,'magnesio')?.value_numeric===2.4,'painel curto extrai magnésio 2,40');
+
 console.log('== Casos-limite ==');
 // censurado
 const cens = P.parseLabText('PCR\nResultado: <0,1 mg/L');

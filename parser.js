@@ -41,6 +41,11 @@
     var accepted=(brand&&structural.length>=1)
       ||(evidence.address&&evidence.panel&&evidence.collection)
       ||(evidence.quality&&evidence.panel&&evidence.collection&&(evidence.hospital||evidence.method||evidence.address))
+      // Painéis curtos (ex.: apenas fósforo/magnésio) podem não conter um dos
+      // títulos de painel acima. A combinação do endereço fixo do laboratório,
+      // controle de qualidade, hospital, coleta e estrutura resultado/referência
+      // continua sendo evidência específica suficiente deste formulário.
+      ||(evidence.quality&&evidence.address&&evidence.hospital&&evidence.collection&&evidence.resultReference)
       ||(evidence.quality&&evidence.address&&evidence.hospital&&evidence.standalone&&evidence.collection&&evidence.resultReference);
     return {
       accepted:accepted,
