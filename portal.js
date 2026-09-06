@@ -55,6 +55,32 @@
   function isComplete(item){
     return Number(item&&item.percExameProcessado)>=100&&String(item&&item.visualizadoPaciente||'').toLowerCase()!=='expirado';
   }
+  function canImport(item){
+    return Number(item&&item.percExameProcessado)>0&&String(item&&item.visualizadoPaciente||'').toLowerCase()!=='expirado';
+  }
+  function needsImport(protocol,encounter,observations,force){
+    if(!canImport(protocol))return false;
+    // O portal pode liberar novos resultados sem mudar a versão do protocolo.
+    if(force||!isComplete(protocol))return true;
+    const code=normalizeProtocol(protocol.codigo),version=protocolVersion(protocol);
+    const record=(encounter.portal_protocols||[]).find(x=>x.protocol===code&&x.version===version);
+    if(!record)return true;
+    const count=observations.filter(o=>o.encounter_id===encounter.id&&o.source_type==='import'&&o.source_protocol===code).length;
+    // O histórico de tentativas não prova que os resultados continuam na ficha.
+    return count===0||record.pending>0||record.result_count==null||count<record.result_count;
+  }
+  function dateRange(start,end){
+    function parse(value){
+      const m=String(value||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if(!m)throw new Error('Preencha as duas datas.');
+      const date=new Date(+m[1],+m[2]-1,+m[3]);
+      if(date.getFullYear()!==+m[1]||date.getMonth()!==+m[2]-1||date.getDate()!==+m[3])throw new Error('Data inválida.');
+      return date;
+    }
+    const startDate=parse(start),endDate=parse(end);
+    if(startDate>endDate)throw new Error('A data inicial deve ser anterior ou igual à final.');
+    return {start:startDate,end:endDate};
+  }
   function formatApiDate(date,endOfDay){
     const d=date instanceof Date?date:new Date(date);
     if(Number.isNaN(d.getTime()))throw new Error('Período de busca inválido.');
@@ -102,12 +128,11 @@
       if(!this.headers)await this.authenticate();
       const filter={dataInicio:formatApiDate(startDate,false),dataFim:formatApiDate(endDate,true),novos:false,paciente:null,pacienteCpf:null};
       const common={method:'POST',headers:{...this.headers,'Content-Type':'application/json'},body:JSON.stringify(filter)};
-      let pages=1;
-      try{
-        const pagination=await this.request(`Paciente/${encodeURIComponent(patient.PacienteId)}/Laudos/FiltroPaginacao?idInstituicao=${encodeURIComponent(patient.InstituicaoId)}&quantidade=50`,common);
-        const info=pagination&&Array.isArray(pagination.registros)?pagination.registros[0]:null;
-        pages=Math.max(1,Math.min(20,Number(info&&info.paginas)||1));
-      }catch(e){ pages=1; }
+      const pagination=await this.request(`Paciente/${encodeURIComponent(patient.PacienteId)}/Laudos/FiltroPaginacao?idInstituicao=${encodeURIComponent(patient.InstituicaoId)}&quantidade=50`,common);
+      const info=pagination&&Array.isArray(pagination.registros)?pagination.registros[0]:null;
+      const total=Number(info&&info.paginas);
+      if(!info||!Number.isSafeInteger(total)||total<0)throw new Error('Não consegui confirmar todas as páginas de exames. Tente consultar o período novamente.');
+      const pages=Math.max(1,total);
       const all=[];
       for(let page=1;page<=pages;page++){
         const data=await this.request(`Paciente/${encodeURIComponent(patient.PacienteId)}/Laudos?IdInstituicao=${encodeURIComponent(patient.InstituicaoId)}&pagina=${page}&quantidade=50`,common);
@@ -129,5 +154,5 @@
     }
   }
 
-  return {API_BASE,Client,parseQrUrl,normalizeName,samePatientName,normalizeProtocol,protocolVersion,isComplete,formatApiDate,decodePdfBase64};
+  return {API_BASE,Client,parseQrUrl,normalizeName,samePatientName,normalizeProtocol,protocolVersion,isComplete,canImport,needsImport,dateRange,formatApiDate,decodePdfBase64};
 });
