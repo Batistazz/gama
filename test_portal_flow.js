@@ -114,6 +114,21 @@ async function main(){
   assert.equal(records.length,21);assert.equal(pages.at(-1),21);
   paging.request=async()=>{throw new Error('Falha na paginação');};
   await assert.rejects(()=>paging.protocols({PacienteId:'p',InstituicaoId:'i'},new Date(),new Date()),/Falha na paginação/);
-  console.log('Fluxo aprovado: ficha vazia, perda parcial, internação longa, liberação 50% → 100% sem duplicatas, notas de pendência, manuais preservados, recusas/falhas recuperáveis e paginação completa.');
+
+  // Quando o laudo fica guardado para leitura: só se algo dele não foi lido.
+  const needs=report=>run(`reportNeedsPdf(${JSON.stringify(report)})`);
+  const ok1={code:'x',label:'l'};
+  assert.equal(needs({accepted:[ok1],blocked:[],notices:[]}),false,'tudo lido: sem laudo guardado');
+  assert.equal(needs({accepted:[ok1],blocked:[{label:'VCM',reasons:['unidade ausente']}],notices:[]}),true,'exame bloqueado: guarda');
+  assert.equal(needs({accepted:[ok1],blocked:[],notices:[{code:'culture'}]}),true,'cultura: guarda');
+  assert.equal(needs({accepted:[ok1],blocked:[],notices:[{code:'urinalysis'}]}),true,'urina: guarda');
+  assert.equal(needs({accepted:[],blocked:[],notices:[{code:'unreadable'}]}),true,'fora do modelo: guarda');
+  assert.equal(needs({accepted:[],blocked:[],notices:[]}),true,'nada reconhecido: guarda');
+  assert.equal(needs({accepted:[ok1],blocked:[],notices:[{code:'portal_partial'}]}),false,'parcial toda lida: só notificação');
+  assert.equal(needs({accepted:[],blocked:[],notices:[{code:'portal_waiting'}]}),false,'nada liberado: só notificação');
+  assert.equal(needs({accepted:[],blocked:[],notices:[{code:'portal_failure'},{code:'portal_partial'}]}),false,'falha de download: só notificação');
+  assert.equal(needs({accepted:[ok1],blocked:[{label:'X',pending_artifact:true}],notices:[{code:'pending'}]}),false,'exame pendente no laboratório: só notificação');
+  assert.equal(needs({accepted:[ok1],blocked:[],notices:[{code:'portal_partial'},{code:'imaging'}]}),true,'parcial com laudo de imagem: guarda');
+  console.log('Fluxo aprovado: ficha vazia, perda parcial, internação longa, liberação 50% → 100% sem duplicatas, notas de pendência, manuais preservados, recusas/falhas recuperáveis, paginação completa e regra do laudo guardado.');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

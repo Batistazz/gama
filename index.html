@@ -131,6 +131,9 @@
   .modal-bg.show{display:flex}
   .modal{background:var(--panel);border-radius:11px;padding:16px;width:min(460px,92vw);max-height:88vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,.25)}
   .modal h3{margin:0 0 4px;font-size:15px}
+  /* Laudo guardado: janela larga, páginas na largura dela. */
+  .modal.wide{width:min(920px,96vw);max-height:94vh}
+  .pdfpages canvas{display:block;width:100%;height:auto;border:1px solid var(--line);margin-bottom:8px;background:#fff}
   .valrow{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:7px;padding:7px 9px;margin:6px 0}
   .valrow .v{font-weight:700;font-variant-numeric:tabular-nums} .valrow .t{color:var(--muted);font-size:12px}
   .src{background:#f5f8f9;border:1px solid var(--line2);border-radius:6px;padding:6px 8px;font-family:ui-monospace,monospace;font-size:11.5px;color:#3a4a52;white-space:pre-wrap;margin-top:4px}
@@ -495,7 +498,8 @@ document.getElementById('btnDelPat').onclick=()=>{
   if(busy){ showToast('Espere a busca de exames deste paciente terminar para excluí-lo.','warn'); return; }
   const encs=DB.encounters.filter(e=>e.patient_id===p.id).length;
   const obs=DB.observations.filter(o=>o.patient_id===p.id).length;
-  const files=(DB.events||[]).filter(e=>e.patient_id===p.id&&e.kind==='exam_doc'&&e.file_id).map(e=>e.file_id);
+  const files=(DB.events||[]).filter(e=>e.patient_id===p.id&&e.kind==='exam_doc'&&e.file_id).map(e=>e.file_id)
+    .concat(reviewFileIds(DB.encounters.filter(e=>e.patient_id===p.id)));
   const parts=[`${obs} resultado${obs!==1?'s':''}`,`${encs} internaç${encs!==1?'ões':'ão'}`];
   if(files.length)parts.push(`${files.length} arquivo${files.length!==1?'s':''}`);
   if(p.portal_access)parts.push('o vínculo do QR');
@@ -722,9 +726,35 @@ function renderEvents(){
   el.querySelectorAll('[data-delev]').forEach(b=>b.onclick=()=>confirmModal({title:'Excluir resultado',message:'Excluir esta cultura?',danger:true,confirmLabel:'Excluir',onYes:()=>{ DB.events=DB.events.filter(e=>e.id!==b.dataset.delev); save(); renderEvents(); }}));
 }
 
+/* Laudo guardado para leitura: quando a importação deixa algum exame sem
+   ler, o PDF fica neste navegador e abre pela pendência — sem voltar ao
+   portal. Aviso de "ainda não liberado" (total ou parcial) e falha de
+   download continuam só como notificação: não há o que ler no laudo. */
+const NOTICE_ONLY=new Set(['pending','portal_waiting','portal_partial','portal_failure']);
+function reportNeedsPdf(report){
+  if(!report)return false;
+  const blocked=(report.blocked||[]).filter(x=>!x.pending_artifact),notices=report.notices||[];
+  if(!(report.accepted||[]).length&&!blocked.length&&!notices.length)return true;   // nada reconhecido
+  return blocked.length>0||notices.some(n=>!NOTICE_ONLY.has(n.code));
+}
+function reviewFileIds(encounters){
+  return encounters.flatMap(e=>(e.import_reviews||[]).map(r=>r.file_id).filter(Boolean));
+}
+function dropReviewFiles(ids){ ids.forEach(id=>idbDelete(id).catch(()=>{})); }
+// Guarda o PDF junto da pendência que ele explica. Falhar aqui não pode
+// derrubar a importação: a pendência continua valendo sem o arquivo.
+async function storeReviewPdf(review,blob){
+  if(!review||!blob)return false;
+  try{
+    const id='laudo_'+uid();
+    await idbSave(id,blob);
+    review.file_id=id; save();
+    return true;
+  }catch(e){ return false; }
+}
 function syncImportReview(report,sourceName,dateISO,targetEncounter,sourceProtocol){
   const encounter=targetEncounter||curEnc;
-  if(!encounter||!report)return false;
+  if(!encounter||!report)return null;
   const blocked=(report.blocked||[]).filter(x=>!x.culture_artifact&&!x.pending_artifact).map(x=>({
     label:x.label||x.key||'Item não identificado', reasons:(x.reasons||[]).slice()
   }));
@@ -734,10 +764,13 @@ function syncImportReview(report,sourceName,dateISO,targetEncounter,sourceProtoc
   const source=(sourceName||'Texto colado').trim()||'Texto colado';
   const key=sourceProtocol?('portal|'+sourceProtocol):(P.norm(source)+'|'+String(when).slice(0,10));
   const reviews=Array.isArray(encounter.import_reviews)?encounter.import_reviews:[];
+  // A leitura nova substitui a antiga, e o laudo guardado da antiga vai junto.
+  dropReviewFiles(reviewFileIds([{import_reviews:reviews.filter(r=>r.key===key)}]));
   encounter.import_reviews=reviews.filter(r=>r.key!==key);
-  if(!blocked.length&&!notices.length)return false;
-  encounter.import_reviews.push({id:uid(),key,source_name:source,source_protocol:sourceProtocol||null,collection_datetime:when,blocked,notices,created_at:new Date().toISOString()});
-  return true;
+  if(!blocked.length&&!notices.length)return null;
+  const review={id:uid(),key,source_name:source,source_protocol:sourceProtocol||null,collection_datetime:when,blocked,notices,created_at:new Date().toISOString()};
+  encounter.import_reviews.push(review);
+  return review;
 }
 function renderImportReviews(){
   const el=document.getElementById('importReviewBlock'); if(!el)return;
@@ -747,20 +780,67 @@ function renderImportReviews(){
   const total=ordered.reduce((n,r)=>n+(r.blocked||[]).length+(r.notices||[]).length,0);
   el.innerHTML=`<div class="card reviewcard">
     <h2>⚠ Pendências detectadas na importação (${total})</h2>
-    <div class="reviewmeta">Aqui aparecem exames aguardando liberação no portal e itens do laudo que precisam de conferência. Resultados já liberados podem estar no quadro. Um item não reconhecido pelo leitor pode não aparecer nesta lista.</div>
+    <div class="reviewmeta">Aqui aparecem exames aguardando liberação no portal e itens do laudo que precisam de conferência. Resultados já liberados podem estar no quadro. Um item não reconhecido pelo leitor pode não aparecer nesta lista. Quando algo do laudo não foi lido, <b>Abrir laudo</b> mostra o PDF aqui mesmo.</div>
     ${ordered.map(r=>`<div class="reviewitem">
       <div><b>${escapeHtml(r.source_name||'Importação')}</b> · ${fmtDay(r.collection_datetime)}</div>
       <ul>
         ${(r.blocked||[]).map(x=>`<li><b>${escapeHtml(x.label||'Item')}</b>: ${escapeHtml((x.reasons||[]).join('; ')||'não importado por segurança')}</li>`).join('')}
         ${(r.notices||[]).map(x=>`<li>${escapeHtml(x)}</li>`).join('')}
       </ul>
-      <button class="btn sm ghost noprint" data-reviewdone="${escapeHtml(r.id)}">Marcar como conferido</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${r.file_id?`<button class="btn sm primary noprint" data-reviewpdf="${escapeHtml(r.id)}">Abrir laudo</button>`:''}
+        <button class="btn sm ghost noprint" data-reviewdone="${escapeHtml(r.id)}">Marcar como conferido</button>
+      </div>
     </div>`).join('')}
   </div>`;
+  el.querySelectorAll('[data-reviewpdf]').forEach(b=>b.onclick=()=>{
+    const r=(curEnc.import_reviews||[]).find(x=>x.id===b.dataset.reviewpdf);
+    if(r)openReviewPdf(r.file_id,`${r.source_name||'Laudo'} · ${fmtDay(r.collection_datetime)}`);
+  });
   el.querySelectorAll('[data-reviewdone]').forEach(b=>b.onclick=()=>{
+    const done=(curEnc.import_reviews||[]).filter(r=>r.id===b.dataset.reviewdone);
     curEnc.import_reviews=(curEnc.import_reviews||[]).filter(r=>r.id!==b.dataset.reviewdone);
+    dropReviewFiles(reviewFileIds([{import_reviews:done}]));
     save(); renderImportReviews(); showToast('Pendência marcada como conferida.','ok');
   });
+}
+
+/* O laudo guardado, página por página, dentro do Gama. "Abrir em nova aba"
+   usa o leitor de PDF do navegador, para quem precisar de zoom. */
+async function openReviewPdf(fileId,title){
+  let blob=null;
+  try{ blob=fileId?await idbGet(fileId):null; }catch(e){}
+  if(!blob){ showToast('O PDF deste laudo não está neste navegador (backup antigo ou apagado). Confira no portal.','warn'); return; }
+  const url=URL.createObjectURL(blob);
+  let closed=false;
+  openModal(`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <h3 style="margin:0">${escapeHtml(title)}</h3><div class="grow"></div>
+      <button class="btn sm" id="pdfTab">Abrir em nova aba</button>
+      <button class="btn sm ghost" id="pdfClose">Fechar</button>
+    </div>
+    <div id="pdfPages" class="pdfpages"><p class="small muted">Abrindo o laudo…</p></div>`,
+    ()=>{ closed=true; setTimeout(()=>URL.revokeObjectURL(url),60000); },{wide:true});
+  document.getElementById('pdfClose').onclick=closeModal;
+  document.getElementById('pdfTab').onclick=()=>window.open(url,'_blank');
+  const box=document.getElementById('pdfPages');
+  try{
+    if(!window.pdfjsLib)throw new Error('o leitor de PDF não carregou');
+    const pdf=await pdfjsLib.getDocument({data:await blob.arrayBuffer()}).promise;
+    box.innerHTML='';
+    for(let n=1;n<=pdf.numPages;n++){
+      if(closed)return;
+      const page=await pdf.getPage(n),base=page.getViewport({scale:1});
+      const viewport=page.getViewport({scale:(box.clientWidth||800)/base.width*(window.devicePixelRatio||1)});
+      const canvas=document.createElement('canvas');
+      canvas.width=Math.ceil(viewport.width); canvas.height=Math.ceil(viewport.height);
+      canvas.setAttribute('aria-label',`Página ${n} de ${pdf.numPages}`);
+      box.appendChild(canvas);
+      await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
+    }
+    box.dataset.pronto='1';
+  }catch(e){
+    if(!closed)box.innerHTML=`<p class="small">Não consegui mostrar o laudo aqui (${escapeHtml(e.message)}). Use <b>Abrir em nova aba</b>.</p>`;
+  }
 }
 
 /* ===================== Modal de célula (ver origem / editar) ===================== */
@@ -818,7 +898,7 @@ const SEX_OPTS=[{value:'',label:'—'},{value:'F',label:'Feminino'},{value:'M',l
 const GRP_LABEL={'Função renal':'Renal'};
 let modalCleanup=null, toastTimer=null;
 function runModalCleanup(){ if(modalCleanup){ const fn=modalCleanup; modalCleanup=null; try{fn();}catch(e){} } }
-function openModal(html,onClose){ runModalCleanup(); modalCleanup=onClose||null; document.getElementById('modal').innerHTML=html; document.getElementById('modalBg').classList.add('show'); }
+function openModal(html,onClose,opts){ runModalCleanup(); modalCleanup=onClose||null; const m=document.getElementById('modal'); m.classList.toggle('wide',!!(opts&&opts.wide)); m.innerHTML=html; document.getElementById('modalBg').classList.add('show'); }
 function showToast(html,kind){
   const el=document.getElementById('toast'); clearTimeout(toastTimer); el.className='toast banner '+(kind==='warn'?'warn':'ok')+' show'; el.innerHTML=html;
   toastTimer=setTimeout(()=>el.classList.remove('show'),5000);
@@ -1074,7 +1154,7 @@ async function runPortalSync(patientId,encounterId,prepared){
     // Mesmo um protocolo sem nenhum resultado liberado precisa aparecer em nota.
     protocols.filter(p=>!PORTAL.canImport(p)&&String(p.visualizadoPaciente||'').toLowerCase()!=='expirado').forEach(p=>{
       const code=PORTAL.normalizeProtocol(p.codigo);
-      syncImportReview({accepted:[],blocked:[],notices:[{message:'Este protocolo ainda não tem resultados liberados. Será consultado novamente na próxima busca.'}]},'Portal '+code,portalProtocolISO(p),encounter,code);
+      syncImportReview({accepted:[],blocked:[],notices:[{code:'portal_waiting',message:'Este protocolo ainda não tem resultados liberados. Será consultado novamente na próxima busca.'}]},'Portal '+code,portalProtocolISO(p),encounter,code);
     });
     const pending=protocols.filter(p=>PORTAL.needsImport(p,encounter,DB.observations,prepared&&prepared.force));
     if(!pending.length){
@@ -1091,23 +1171,33 @@ async function runPortalSync(patientId,encounterId,prepared){
         const pdf=await client.pdf(remote,protocol),extracted=await portalPdfText(pdf,detail=>setPortalJob(key,{detail}));
         if(!extracted.text.trim())throw new Error('O PDF veio sem texto legível.');
         const profile=P.assessHospitalLabText(extracted.text),fallback=portalProtocolISO(protocol);
-        let stats;
+        let stats,report,entry;
         if(!profile.accepted){
           const warning='Este laudo do portal não correspondeu ao modelo automático. Confira o PDF manualmente.';
-          const report={accepted:[],blocked:[],notices:[{message:warning}],dateISO:P.detectDate(extracted.text)};
+          report={accepted:[],blocked:[],notices:[{code:'unreadable',message:warning}],dateISO:P.detectDate(extracted.text)};
           addPortalPendingNotice(report,protocol);
-          syncImportReview(report,'Portal '+code,fallback||report.dateISO,encounter,code); stats={added:0,skipped:0,corrected:0,pending:report.notices.length};
+          entry=syncImportReview(report,'Portal '+code,fallback||report.dateISO,encounter,code); stats={added:0,skipped:0,corrected:0,pending:report.notices.length};
         }else{
-          const report=P.triageConservative(extracted.text,fallback);
+          report=P.triageConservative(extracted.text,fallback);
           addPortalPendingNotice(report,protocol);
-          stats=report.accepted.length?commitResults(report.accepted,fallback||report.dateISO,report,'Portal '+code,{patient,encounter,sourceProtocol:code,silent:true}):{added:0,skipped:0,corrected:0,pending:(report.blocked||[]).length+(report.notices||[]).length};
-          if(!report.accepted.length)syncImportReview(report,'Portal '+code,fallback||report.dateISO,encounter,code);
+          if(report.accepted.length){
+            stats=commitResults(report.accepted,fallback||report.dateISO,report,'Portal '+code,{patient,encounter,sourceProtocol:code,silent:true});
+            entry=stats.review;
+          }else{
+            stats={added:0,skipped:0,corrected:0,pending:(report.blocked||[]).length+(report.notices||[]).length};
+            entry=syncImportReview(report,'Portal '+code,fallback||report.dateISO,encounter,code);
+          }
+        }
+        // Algo do laudo ficou sem ler: o PDF fica guardado na pendência.
+        if(entry&&reportNeedsPdf(report)){
+          setPortalJob(key,{detail:'Guardando o laudo para leitura…'});
+          try{ await storeReviewPdf(entry,new Blob([base64PdfBytes(pdf)],{type:'application/pdf'})); }catch(e){}
         }
         added+=stats.added||0; skipped+=stats.skipped||0; corrected+=stats.corrected||0; review+=stats.pending||0;
         rememberProtocol(encounter,protocol,stats); save();
       }catch(error){
         failed++;
-        const report={accepted:[],blocked:[],notices:[{message:'Não foi possível ler este protocolo nesta busca. Ele será tentado novamente na próxima.'}]};
+        const report={accepted:[],blocked:[],notices:[{code:'portal_failure',message:'Não foi possível ler este protocolo nesta busca. Ele será tentado novamente na próxima.'}]};
         addPortalPendingNotice(report,protocol);
         syncImportReview(report,'Portal '+code,portalProtocolISO(protocol),encounter,code);
         rememberProtocol(encounter,protocol,{pending:report.notices.length});
@@ -1130,7 +1220,7 @@ async function runPortalSync(patientId,encounterId,prepared){
 function addPortalPendingNotice(report,protocol){
   if(PORTAL.isComplete(protocol))return;
   if(!report.notices)report.notices=[];
-  report.notices.push({message:`Protocolo parcialmente liberado (${Number(protocol.percExameProcessado)}%). Há exames pendentes no laboratório. Os resultados já liberados são importados quando reconhecidos; a próxima busca tentará completar os demais sem duplicar os anteriores.`});
+  report.notices.push({code:'portal_partial',message:`Protocolo parcialmente liberado (${Number(protocol.percExameProcessado)}%). Há exames pendentes no laboratório. Os resultados já liberados são importados quando reconhecidos; a próxima busca tentará completar os demais sem duplicar os anteriores.`});
 }
 async function linkPortalFromFile(file,patientId,encounterId){
   const patient=DB.patients.find(p=>p.id===patientId),encounter=DB.encounters.find(e=>e.id===encounterId); if(!patient||!encounter)return;
@@ -1196,7 +1286,8 @@ function conservativeMessage(report,added,skipped,corrected){
   }
   return parts.join(' ');
 }
-function doProcess(text,fallbackDateISO,sourceName){
+/* pdfFile: o PDF de onde o texto saiu, guardado se algo ficar sem ler. */
+function doProcess(text,fallbackDateISO,sourceName,pdfFile){
   if(!text||!text.trim()){ msgImport('warn','Cole algum texto primeiro.'); return; }
   if(!curEnc){ msgImport('warn','Paciente sem internação.'); return; }
   const report=P.triageConservative(text,fallbackDateISO);
@@ -1204,15 +1295,21 @@ function doProcess(text,fallbackDateISO,sourceName){
     formModal({
       title:'Qual a data destes exames?', subtitle:'Não achei a data da coleta no documento. Esta data será usada no quadro.', submitLabel:'Usar esta data',
       fields:[{name:'d',label:'Data da coleta',type:'date',required:true,value:todayISOdate()}],
-      onSubmit:v=>{ closeModal(); doProcess(text,isoFromDateInput(v.d),sourceName); }
+      onSubmit:v=>{ closeModal(); doProcess(text,isoFromDateInput(v.d),sourceName,pdfFile); }
     });
     return;
   }
   if(!report.accepted.length){
-    syncImportReview(report,sourceName,fallbackDateISO||report.dateISO); save();
-    const msg=conservativeMessage(report,0,0); msgImport('warn',msg); showToast(msg,'warn'); setTab('folhao'); return;
+    const entry=syncImportReview(report,sourceName,fallbackDateISO||report.dateISO); save();
+    const msg=conservativeMessage(report,0,0); msgImport('warn',msg); showToast(msg,'warn'); setTab('folhao');
+    keepManualPdf(entry,report,pdfFile); return;
   }
-  commitResults(report.accepted,fallbackDateISO||report.dateISO,report,sourceName);
+  const result=commitResults(report.accepted,fallbackDateISO||report.dateISO,report,sourceName);
+  keepManualPdf(result.review,report,pdfFile);
+}
+function keepManualPdf(entry,report,pdfFile){
+  if(!pdfFile||!entry||!reportNeedsPdf(report))return;
+  storeReviewPdf(entry,pdfFile).then(ok=>{ if(ok&&curEnc)renderImportReviews(); });
 }
 function processCulture(text){
   const cult=P.parseCulture(text);
@@ -1294,7 +1391,7 @@ function commitResults(results,useISO,report,sourceName,options){
     existing.add(sig); DB.observations.push(next);
     if(r.confidence==='warn')warn++; else ok++;
   });
-  syncImportReview(report,sourceName,useISO,encounter,sourceProtocol); save();
+  const review=syncImportReview(report,sourceName,useISO,encounter,sourceProtocol); save();
   const paste=document.getElementById('pasteArea'); if(paste&&!options.silent)paste.value='';
   const dl=[...datas].sort();
   const quando = dl.length>1 ? (dl.length+' datas ('+dl.map(d=>d.slice(8,10)+'/'+d.slice(5,7)).join(', ')+')') : fmtDay(dl[0]||useISO);
@@ -1304,7 +1401,7 @@ function commitResults(results,useISO,report,sourceName,options){
     : `Nenhum resultado novo: ${skipped} duplicado(s) já estava(m) na grade.`);
   const hasManual=report&&((report.blocked||[]).length||(report.notices||[]).length);
   if(!options.silent){ msgImport(hasManual?'warn':'ok',msg); showToast(msg,hasManual?'warn':'ok'); setTab('folhao'); }
-  return {added,warn,skipped,corrected,pending:report?((report.blocked||[]).length+(report.notices||[]).length):0,message:msg};
+  return {added,warn,skipped,corrected,pending:report?((report.blocked||[]).length+(report.notices||[]).length):0,message:msg,review};
 }
 function msgImport(kind,html){ document.getElementById('importMsg').innerHTML=`<div class="banner ${kind}">${html}</div>`; }
 
@@ -1346,12 +1443,14 @@ async function importarArquivo(file){
     const profile=P.assessHospitalLabText(text);
     if(!profile.accepted){
       const warning='Este PDF não corresponde ao modelo KN/Controllab do hospital. Por segurança, nenhum resultado foi colocado no quadro.';
-      syncImportReview({accepted:[],blocked:[],notices:[{message:warning}],dateISO:P.detectDate(text)},file.name||'PDF do laboratório'); save();
+      const report={accepted:[],blocked:[],notices:[{code:'unreadable',message:warning}],dateISO:P.detectDate(text)};
+      const entry=syncImportReview(report,file.name||'PDF do laboratório'); save();
       msgImport('warn',warning); showToast(warning,'warn'); setTab('folhao');
+      keepManualPdf(entry,report,file);
       return;
     }
     if(ocrPages) msgImport('ok',`OCR concluído em ${ocrPages} página(s). Colocando os exames no quadro…`);
-    doProcess(text,null,file.name||'PDF do laboratório');
+    doProcess(text,null,file.name||'PDF do laboratório',file);
   }catch(e){ const msg='Não foi possível ler este PDF: '+escapeHtml(e.message); msgImport('warn',msg); showToast(msg,'warn'); }
 }
 let _ocrWorker=null, _ocrCtx='';
@@ -1413,16 +1512,25 @@ function normalizedBackupDB(raw){
   if(!raw||!Array.isArray(raw.patients)||!Array.isArray(raw.observations))throw new Error('estrutura de dados inválida');
   return {patients:raw.patients,encounters:Array.isArray(raw.encounters)?raw.encounters:[],observations:raw.observations,events:Array.isArray(raw.events)?raw.events:[]};
 }
+/* Arquivos que o backup leva: PDFs/fotos arquivados e laudos guardados nas pendências. */
+function backupFileRefs(db){
+  const refs=(db.events||[]).filter(e=>e.kind==='exam_doc'&&e.file_id).map(e=>({id:e.file_id,filename:e.filename||'',mime:e.mime||''}));
+  reviewFileIds(db.encounters||[]).forEach(id=>refs.push({id,filename:id+'.pdf',mime:'application/pdf'}));
+  return refs;
+}
+async function backupAttachments(){
+  const attachments=[]; let missing=0;
+  for(const ref of backupFileRefs(DB)){
+    let file=null; try{file=await idbGet(ref.id);}catch(e){}
+    if(!file){missing++;continue;}
+    attachments.push({id:ref.id,filename:ref.filename,mime:ref.mime||file.type||'',data_url:await blobToDataURL(file)});
+  }
+  return {attachments,missing};
+}
 document.getElementById('btnExport').onclick=async()=>{
   const btn=document.getElementById('btnExport'), old=btn.textContent; btn.disabled=true; btn.textContent='Preparando…';
   try{
-    const attachments=[]; let missing=0;
-    const docs=(DB.events||[]).filter(e=>e.kind==='exam_doc'&&e.file_id);
-    for(const ev of docs){
-      let file=null; try{file=await idbGet(ev.file_id);}catch(e){}
-      if(!file){missing++;continue;}
-      attachments.push({id:ev.file_id,filename:ev.filename||'',mime:ev.mime||file.type||'',data_url:await blobToDataURL(file)});
-    }
+    const {attachments,missing}=await backupAttachments();
     const pack={format:'gama-backup',version:2,exported_at:new Date().toISOString(),db:DB,attachments};
     const blob=new Blob([JSON.stringify(pack)],{type:'application/json'}), url=URL.createObjectURL(blob);
     const a=document.createElement('a'); a.href=url; a.download='gama_backup_'+new Date().toISOString().slice(0,10)+'.json'; document.body.appendChild(a); a.click(); a.remove();
@@ -1435,7 +1543,7 @@ document.getElementById('btnImportF').onclick=()=>document.getElementById('fileB
 document.getElementById('fileBackup').onchange=e=>{ const input=e.target, f=input.files[0]; if(!f)return; const r=new FileReader();
   r.onload=()=>{ try{
     const parsed=JSON.parse(r.result), restored=normalizedBackupDB(parsed.db||parsed), attachments=Array.isArray(parsed.attachments)?parsed.attachments:[];
-    const expected=new Set(restored.events.filter(x=>x.kind==='exam_doc'&&x.file_id).map(x=>x.file_id));
+    const expected=new Set(backupFileRefs(restored).map(x=>x.id));
     const supplied=new Set(attachments.map(x=>x&&x.id).filter(Boolean)), absent=[...expected].filter(id=>!supplied.has(id)).length;
     const detail=`${restored.patients.length} paciente(s), ${restored.observations.length} resultado(s) e ${attachments.length} arquivo(s).`+(absent?` Atenção: ${absent} arquivo(s) arquivado(s) não estão dentro deste backup antigo.`:'');
     confirmModal({title:'Restaurar backup',message:'Substituir todos os dados e arquivos atuais por este backup? '+detail,danger:true,confirmLabel:'Substituir',onYes:async()=>{
