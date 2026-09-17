@@ -232,6 +232,7 @@
         <button class="btn sm ghost noprint" id="btnPortalHistory" disabled>Datas e reimportação</button>
         <input type="file" id="filePortalQr" accept="application/pdf,image/*" hidden>
         <button class="btn sm ghost noprint" id="btnEditPat">Editar</button>
+        <button class="btn sm ghost noprint" id="btnDelPat" style="color:var(--high)" title="Apaga este paciente e todos os exames dele deste navegador">Excluir</button>
         <button class="btn sm ghost noprint" id="btnBlank" title="Imprimir uma folha em branco com a lista padrão de exames, pra preencher à mão">Folha em branco</button>
         <button class="btn sm noprint" id="btnPrint">🖨 Imprimir</button>
         <div id="portalState" class="portalstate"></div>
@@ -300,7 +301,7 @@ Potássio: 5,2 mEq/L"></textarea>
 <script src="vendor/tesseract/tesseract.min.js"></script>
 <script src="vendor/pdf.min.js"></script>
 <script src="vendor/jsQR.js"></script>
-<script src="portal.js?v=20260906-1"></script>
+<script src="portal.js?v=20260916-1"></script>
 <script src="parser.js?v=20260905-1"></script>
 <script>
 'use strict';
@@ -465,6 +466,37 @@ document.getElementById('btnEditPat').onclick=()=>{
       save(); closeModal(); openPaciente(curPat.id);
     }
   });
+};
+
+/* Excluir leva junto tudo o que pertence ao paciente: internações (com as
+   notas de pendência), resultados, culturas, arquivos do IndexedDB e o vínculo
+   do QR, que mora no próprio paciente. Com busca no portal em andamento, a
+   exclusão espera: a busca gravaria resultados de um paciente que não existe. */
+document.getElementById('btnDelPat').onclick=()=>{
+  if(!curPat)return;
+  const p=curPat;
+  const busy=[...portalJobs.entries()].some(([k,j])=>k.startsWith(p.id+'|')&&!j.finished);
+  if(busy){ showToast('Espere a busca de exames deste paciente terminar para excluí-lo.','warn'); return; }
+  const encs=DB.encounters.filter(e=>e.patient_id===p.id).length;
+  const obs=DB.observations.filter(o=>o.patient_id===p.id).length;
+  const files=(DB.events||[]).filter(e=>e.patient_id===p.id&&e.kind==='exam_doc'&&e.file_id).map(e=>e.file_id);
+  const parts=[`${obs} resultado${obs!==1?'s':''}`,`${encs} internaç${encs!==1?'ões':'ão'}`];
+  if(files.length)parts.push(`${files.length} arquivo${files.length!==1?'s':''}`);
+  if(p.portal_access)parts.push('o vínculo do QR');
+  confirmModal({title:'Excluir paciente',danger:true,confirmLabel:'Excluir paciente',
+    message:`Excluir ${p.name||'este paciente'} deste navegador, com ${parts.slice(0,-1).join(', ')} e ${parts[parts.length-1]}? Não dá pra desfazer — faça um Backup antes se quiser guardar.`,
+    onYes:async()=>{
+      DB.patients=DB.patients.filter(x=>x.id!==p.id);
+      DB.encounters=DB.encounters.filter(e=>e.patient_id!==p.id);
+      DB.observations=DB.observations.filter(o=>o.patient_id!==p.id);
+      DB.events=(DB.events||[]).filter(e=>e.patient_id!==p.id);
+      save();
+      curPat=null; curEnc=null;
+      renderPacientes(); show('pacientes');
+      let lost=0;
+      for(const id of files){ try{ await idbDelete(id); }catch(e){ lost++; } }
+      showToast(lost?`Paciente excluído. <b>${lost} arquivo(s) não puderam ser apagados</b> e continuam ocupando espaço até “Limpar”.`:`${escapeHtml(p.name||'Paciente')} excluído.`,lost?'warn':'ok');
+    }});
 };
 
 /* ===================== Motor: séries e comparações ===================== */
@@ -794,7 +826,9 @@ function renderPortalControls(){
   const observations=curEnc?DB.observations.filter(o=>o.encounter_id===curEnc.id):[];
   const days=daysOf(observations);
   const coverage=days.length?`${days.length} dia(s) com resultados na ficha: ${portalDayLabel(days[0])} a ${portalDayLabel(days[days.length-1])}`:'Ficha sem resultados. Use “Datas e reimportação” para consultar e importar o período desejado.';
-  state.className='portalstate ok'; state.textContent=`Portal vinculado a ${access.portal_name||'este paciente'} · última busca: ${last} · ${coverage}`;
+  // QR de laudo avulso só enxerga aquele laudo: exames de outro dia pedem o QR deles.
+  const scope=access.single_report?' · Este QR abre um laudo só; para exames de outro dia, use “Trocar QR” com o QR do laudo novo.':'';
+  state.className='portalstate ok'; state.textContent=`Portal vinculado a ${access.portal_name||'este paciente'} · última busca: ${last} · ${coverage}${scope}`;
 }
 function portalDayLabel(value){
   const match=String(value||'').match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -935,6 +969,7 @@ async function runPortalSync(patientId,encounterId,prepared){
     if(!prepared||!prepared.client)await client.authenticate();
     const remote=(prepared&&prepared.remote)||await client.patient(),remoteName=remote.NomePaciente||remote.Nome||access.portal_name||'';
     if(access.portal_name&&PORTAL.normalizeName(access.portal_name)!==PORTAL.normalizeName(remoteName))throw new Error('O QR passou a abrir outro paciente. Leia o QR novamente.');
+    if(patient.portal_access)patient.portal_access.single_report=PORTAL.isSingleReport(remote);
     const start=prepared&&prepared.range?prepared.range.start:new Date(encounter.admission_date||Date.now()-365*86400000);
     if(!prepared||!prepared.range)start.setDate(start.getDate()-2);
     const end=prepared&&prepared.range?prepared.range.end:new Date();
@@ -1014,7 +1049,7 @@ async function linkPortalFromFile(file,patientId,encounterId){
       const allowed=await askPortalPatientMismatch(patient.name,remoteName||'nome não informado');
       if(!allowed){finishPortalJob(key,'error','Vínculo cancelado.','O QR não foi associado a esta folha.');return;}
     }
-    patient.portal_access={code:access.code,password:access.password,portal_name:remoteName,linked_at:new Date().toISOString(),last_sync_at:null,last_summary:''}; save();
+    patient.portal_access={code:access.code,password:access.password,portal_name:remoteName,linked_at:new Date().toISOString(),last_sync_at:null,last_summary:'',single_report:PORTAL.isSingleReport(remote)}; save();
     if(curPat&&curPat.id===patientId)renderPortalControls();
     await runPortalSync(patientId,encounterId,{access:patient.portal_access,client,remote,reuseJob:true});
   }catch(error){ finishPortalJob(key,'error','Não consegui ler ou vincular o QR.',error.message||'Falha inesperada.'); }
@@ -1248,6 +1283,7 @@ wireDrop('drop','filePdf',importarArquivo,'Escolher PDF do laboratório para imp
 function idbOpen(){ return new Promise((res,rej)=>{ const r=indexedDB.open('gama_files',1); r.onupgradeneeded=()=>r.result.createObjectStore('files'); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
 async function idbSave(id,blob){ const db=await idbOpen(); return new Promise((res,rej)=>{ const t=db.transaction('files','readwrite'); t.objectStore('files').put(blob,id); t.oncomplete=()=>{db.close();res();}; t.onerror=()=>{db.close();rej(t.error);}; }); }
 async function idbGet(id){ const db=await idbOpen(); return new Promise((res,rej)=>{ const t=db.transaction('files','readonly'); const q=t.objectStore('files').get(id); q.onsuccess=()=>{const value=q.result;db.close();res(value);}; q.onerror=()=>{db.close();rej(q.error);}; }); }
+async function idbDelete(id){ const db=await idbOpen(); return new Promise((res,rej)=>{ const t=db.transaction('files','readwrite'); t.objectStore('files').delete(id); t.oncomplete=()=>{db.close();res();}; t.onerror=()=>{db.close();rej(t.error);}; }); }
 async function idbClear(){ const db=await idbOpen(); return new Promise((res,rej)=>{ const t=db.transaction('files','readwrite'); t.objectStore('files').clear(); t.oncomplete=()=>{db.close();res();}; t.onerror=()=>{db.close();rej(t.error);}; }); }
 
 /* ===================== Alterações ===================== */

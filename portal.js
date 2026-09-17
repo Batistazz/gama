@@ -93,6 +93,27 @@
     return clean;
   }
 
+  // QR de UM laudo: o portal devolve o próprio laudo (Id, Codigo, percentual)
+  // com PacienteId nulo. O site do laboratório abre esse caso direto na tela
+  // do laudo, sem histórico, e baixa o PDF por Laudo/Get — sem PacienteId não
+  // há lista de protocolos. Antes o Gama recusava esse QR como "paciente não
+  // localizado", embora o laudo estivesse lá.
+  function isSingleReport(patient){
+    return !!patient&&!patient.PacienteId&&patient.Id!=null&&!!patient.Codigo;
+  }
+  function singleReportProtocol(patient){
+    return {id:patient.Id,codigo:patient.Codigo,percExameProcessado:Number(patient.PercExameProcessado)||0,
+      visualizadoPaciente:'',dataHoraSolicitacao:patient.DataHoraSolicitacao||null,
+      // Muda quando o laboratório reenvia o laudo: serve de versão.
+      dataHora:patient.DataUltimoEnvio||patient.DataHoraSolicitacao||null,single_report:true};
+  }
+  function insideRange(value,startDate,endDate){
+    const m=String(value||'').match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})/);
+    if(!m)return true;   // sem data legível: mostrar é mais seguro que esconder
+    const when=m[1]+' '+m[2];
+    return when>=formatApiDate(startDate,false)&&when<=formatApiDate(endDate,true);
+  }
+
   class Client{
     constructor(access){
       if(!access||!access.code||!access.password)throw new Error('Acesso do QR ausente.');
@@ -121,10 +142,15 @@
     async patient(){
       if(!this.headers)await this.authenticate();
       const data=await this.request(`Paciente/Laudos?codigo=${encodeURIComponent(this.access.code)}&psw=${encodeURIComponent(this.access.password)}`,{headers:this.headers});
-      if(!data||!data.PacienteId||!data.InstituicaoId)throw new Error('O portal não localizou o paciente deste QR.');
+      if(!data||!data.InstituicaoId||!(data.PacienteId||isSingleReport(data)))throw new Error('O portal não localizou o paciente deste QR.');
       return data;
     }
     async protocols(patient,startDate,endDate){
+      if(isSingleReport(patient)){
+        // O período vale como na lista: pela data de envio do laudo.
+        const only=singleReportProtocol(patient);
+        return insideRange(only.dataHora,startDate,endDate)?[only]:[];
+      }
       if(!this.headers)await this.authenticate();
       const filter={dataInicio:formatApiDate(startDate,false),dataFim:formatApiDate(endDate,true),novos:false,paciente:null,pacienteCpf:null};
       const common={method:'POST',headers:{...this.headers,'Content-Type':'application/json'},body:JSON.stringify(filter)};
@@ -142,6 +168,12 @@
     }
     async pdf(patient,protocol){
       if(!this.headers)await this.authenticate();
+      if(protocol&&protocol.single_report){
+        // historico=false: só este laudo, sem colunas de resultados anteriores.
+        const query=`codigo=${encodeURIComponent(base64Encode(this.access.code))}&senha=${encodeURIComponent(base64Encode(this.access.password))}&historico=false`;
+        const data=await this.request('Laudo/Get?'+query,{headers:this.headers});
+        return decodePdfBase64(data&&(data.Base64||data.Stream));
+      }
       try{
         const data=await this.request(`Paciente/${encodeURIComponent(patient.PacienteId)}/Laudos/${encodeURIComponent(protocol.id)}`,{headers:this.headers});
         const row=data&&Array.isArray(data.registros)?data.registros[0]:null;
@@ -154,5 +186,5 @@
     }
   }
 
-  return {API_BASE,Client,parseQrUrl,normalizeName,samePatientName,normalizeProtocol,protocolVersion,isComplete,canImport,needsImport,dateRange,formatApiDate,decodePdfBase64};
+  return {API_BASE,Client,parseQrUrl,normalizeName,samePatientName,normalizeProtocol,protocolVersion,isComplete,canImport,needsImport,dateRange,formatApiDate,decodePdfBase64,isSingleReport,singleReportProtocol};
 });
