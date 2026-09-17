@@ -82,6 +82,17 @@
   .folha th.tnd,.folha td.tnd{color:#000;font-weight:600;font-size:12px}
   .folha td.tnd.up,.folha td.tnd.down{color:#000}
 
+  /* Exames complementares anotados à mão (urocultura, imagem, ECG…) */
+  .compl .crow{display:grid;grid-template-columns:150px minmax(140px,1fr) minmax(0,2.4fr) auto;gap:6px;align-items:start;padding:5px 0;border-bottom:1px solid var(--line2)}
+  .compl .chead{font-size:11.5px;color:var(--muted);font-weight:600;border-bottom:1px solid var(--line);padding:0 0 3px}
+  .compl .crow input,.compl .crow textarea{width:100%;min-width:0;padding:5px 7px;font:inherit;font-size:13px}
+  .compl .crow textarea{min-height:32px;height:32px;resize:none;overflow:hidden;font-family:inherit}
+  @media (max-width:640px){
+    .compl .crow{grid-template-columns:1fr auto}
+    .compl .chead{display:none}
+    .compl .crow .cx{order:1} .compl .crow .ce,.compl .crow .ct{order:2;grid-column:1 / -1}
+  }
+
   /* Eventos: culturas (e futuramente imagem) — seção que flui abaixo da grade */
   .evsec h2{margin:0 0 8px}
   .evcard{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px;break-inside:avoid}
@@ -182,6 +193,10 @@
     .legend .sw{display:none}
     .reviewcard{border:2px solid #000!important;background:#fff!important;color:#000!important}
     .reviewmeta{color:#000!important}
+    .compl h2{font-size:12px}
+    .compl table{font-size:9.5px}
+    .compl th,.compl td{border:1px solid #000;padding:2px 4px;text-align:left;vertical-align:top;color:#000;white-space:pre-wrap}
+    .compl th{background:#f0f0f0!important}
     /* eventos preenchem o fim da folha em 2 colunas e transbordam pro verso */
     .evsec{column-count:2;column-gap:12px} .evsec h2{column-span:all;font-size:12px}
     .evcard{border:1px solid #000;padding:5px 7px;break-inside:avoid}
@@ -265,6 +280,7 @@
           <span class="print-only">+/++ = acima · −/−− = abaixo (2 sinais = bem fora) · ▢ = incerto</span>
         </div>
       </div>
+      <div id="complBlock"></div>
       <div id="eventsBlock"></div>
     </div>
 
@@ -538,6 +554,7 @@ function trend(series){
 function renderFolhao(){
   renderPrintHeader();
   renderImportReviews();
+  renderComplementares();
   renderEvents();
   const lg=document.getElementById('folhaLegend');
   const obsAll=encObs();
@@ -603,6 +620,84 @@ function renderFolhao(){
 
 /* ===================== Eventos (culturas; imagem na próxima etapa) ===================== */
 function encEvents(){ return (DB.events||[]).filter(e=>e.encounter_id===(curEnc&&curEnc.id)); }
+
+/* ===================== Exames complementares (anotados à mão) =====================
+   Urocultura, imagem, ECG e afins: algumas linhas de texto por internação, sem
+   leitura automática — o que foi escrito é o que vale e o que sai no papel.
+   Moram em DB.events (kind 'complementar'): entram no Backup e saem junto
+   quando o paciente é excluído. */
+const COMPL_SUGESTOES=['Urocultura','Hemocultura','Cultura de secreção','Cultura de ponta de cateter','EAS (urina tipo 1)',
+  'RX de tórax','TC de crânio','TC de tórax','TC de abdome','USG de abdome','USG de vias urinárias','Doppler venoso',
+  'Ecocardiograma','ECG','Endoscopia digestiva alta','Líquor'];
+function complEvents(){
+  return encEvents().filter(e=>e.kind==='complementar').sort((a,b)=>
+    String(a.collection_datetime||'').localeCompare(String(b.collection_datetime||''))||String(a.created_at||'').localeCompare(String(b.created_at||'')));
+}
+function complRowHtml(ev){
+  return `<div class="crow" data-id="${escapeHtml(ev.id)}">
+    <input type="date" class="cd" value="${escapeHtml(dateInputFromISO(ev.collection_datetime))}" aria-label="Data do exame">
+    <input type="text" class="ce" list="complSug" value="${escapeHtml(ev.title||'')}" placeholder="Urocultura, TC de tórax…" aria-label="Exame">
+    <textarea class="ct" rows="1" placeholder="Resultado ou impressão do laudo" aria-label="Resultado">${escapeHtml(ev.text||'')}</textarea>
+    <button class="btn sm ghost cx" title="Excluir esta linha">excluir</button>
+  </div>`;
+}
+function growCompl(t){ t.style.height='auto'; t.style.height=(t.scrollHeight+2)+'px'; }
+let complTimer=null;
+function saveComplSoon(){ clearTimeout(complTimer); complTimer=setTimeout(()=>{ save(); renderComplPrint(); },400); }
+function renderComplementares(){
+  const el=document.getElementById('complBlock'); if(!el)return;
+  if(!curPat||!curEnc){ el.innerHTML=''; return; }
+  const evs=complEvents();
+  el.innerHTML=`<div class="card compl">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+      <h2 style="margin:0">Exames complementares</h2>
+      <span class="small muted noprint">urocultura, imagem, ECG e afins — anotados à mão</span>
+      <div class="grow"></div>
+      <button class="btn sm noprint" id="complAdd">＋ Linha</button>
+    </div>
+    <div class="noprint">${evs.length
+      ?'<div class="crow chead"><span>Data</span><span>Exame</span><span>Resultado / laudo</span><span></span></div>'+evs.map(complRowHtml).join('')
+      :'<p class="small muted" style="margin:4px 0">Nenhum anotado. Use <b>＋ Linha</b>.</p>'}</div>
+    <div class="print-only" id="complPrint"></div>
+    <datalist id="complSug">${COMPL_SUGESTOES.map(s=>`<option value="${escapeHtml(s)}">`).join('')}</datalist>
+  </div>`;
+  document.getElementById('complAdd').onclick=()=>{
+    const ev={id:uid(),patient_id:curPat.id,encounter_id:curEnc.id,kind:'complementar',source_type:'manual',
+      collection_datetime:isoFromDateInput(todayISOdate()),title:'',text:'',created_at:new Date().toISOString()};
+    DB.events=DB.events||[]; DB.events.push(ev); save(); renderComplementares();
+    const row=document.querySelector(`#complBlock .crow[data-id="${ev.id}"] .ce`); if(row)row.focus();
+  };
+  el.querySelectorAll('.crow[data-id]').forEach(row=>{
+    const ev=(DB.events||[]).find(e=>e.id===row.dataset.id); if(!ev)return;
+    const date=row.querySelector('.cd'),title=row.querySelector('.ce'),text=row.querySelector('.ct');
+    // A data reordena a lista: só ao sair do campo, para a linha não pular enquanto se digita.
+    date.onchange=()=>{ ev.collection_datetime=date.value?isoFromDateInput(date.value):null; save(); renderComplementares(); };
+    title.oninput=()=>{ ev.title=title.value; saveComplSoon(); };
+    text.oninput=()=>{ ev.text=text.value; growCompl(text); saveComplSoon(); };
+    row.querySelector('.cx').onclick=()=>{
+      const drop=()=>{ DB.events=DB.events.filter(e=>e.id!==ev.id); save(); renderComplementares(); };
+      if(!(ev.title||'').trim()&&!(ev.text||'').trim()){ drop(); return; }
+      confirmModal({title:'Excluir exame complementar',danger:true,confirmLabel:'Excluir',
+        message:`Excluir "${(ev.title||'sem nome').trim()}"${ev.collection_datetime?' de '+fmtDay(ev.collection_datetime):''}? Não dá pra desfazer.`,onYes:drop});
+    };
+  });
+  renderComplPrint();
+  // Ao abrir o paciente, o painel ainda está escondido quando é desenhado e
+  // toda caixa mede zero: a altura é tirada depois que a tela aparece.
+  setTimeout(growAllCompl,0);
+}
+function growAllCompl(){ document.querySelectorAll('#complBlock .crow .ct').forEach(growCompl); }
+let complResize=null;
+window.addEventListener('resize',()=>{ clearTimeout(complResize); complResize=setTimeout(growAllCompl,150); });
+/* No papel: só as linhas escritas, e algumas em branco para completar à mão. */
+function renderComplPrint(){
+  const el=document.getElementById('complPrint'); if(!el)return;
+  const rows=complEvents().filter(e=>(e.title||'').trim()||(e.text||'').trim());
+  let h=rows.length?'<table><thead><tr><th style="width:11%">Data</th><th style="width:22%">Exame</th><th>Resultado / laudo</th></tr></thead><tbody>'+
+    rows.map(e=>`<tr><td>${e.collection_datetime?fmtGridDay(e.collection_datetime):'—'}</td><td>${escapeHtml(e.title||'')}</td><td>${escapeHtml(e.text||'')}</td></tr>`).join('')+'</tbody></table>':'';
+  for(let i=0;i<(rows.length?2:3);i++)h+='<div class="nl"></div>';
+  el.innerHTML=h;
+}
 function growthBadge(g){ if(g==='negativo')return '<span class="badge neg">negativo</span>'; if(g==='positivo')return '<span class="badge pos">positivo</span>'; return '<span class="badge warnb">indefinido</span>'; }
 function cultureCard(ev){
   const warn=ev.confidence==='warn';
@@ -1379,7 +1474,7 @@ function renderBlankGrid(){
   return h+'</tbody></table>';
 }
 function renderBlankNotes(){
-  let h='<div class="notes"><div class="notes-h">Outros exames</div>';
+  let h='<div class="notes"><div class="notes-h">Exames complementares</div>';
   for(let i=0;i<4;i++) h+='<div class="nl"></div>';
   return h+'</div>';
 }
@@ -1387,6 +1482,7 @@ function printBlank(){
   setTab('folhao'); renderPrintHeader();
   document.getElementById('folhaBody').innerHTML=renderBlankGrid()+renderBlankNotes();
   const ev=document.getElementById('eventsBlock'); if(ev) ev.innerHTML='';
+  const cb=document.getElementById('complBlock'); if(cb) cb.innerHTML='';
   const rev=document.getElementById('importReviewBlock'); if(rev) rev.innerHTML='';
   const lg=document.getElementById('folhaLegend'); if(lg) lg.style.display='none';
   window.onafterprint=function(){ window.onafterprint=null; renderFolhao(); };

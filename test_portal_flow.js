@@ -14,7 +14,7 @@ function app(){
     return nodes.get(id);
   }
   const context=vm.createContext({console,Date,Math,Map,Set,URL,Uint8Array,Parser,
-    window:{Parser,PortalLab:Portal},
+    window:{Parser,PortalLab:Portal,addEventListener(){}},
     document:{getElementById:node,querySelectorAll:()=>[],addEventListener(){}},
     localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},
     setTimeout:(fn,ms)=>{if(ms===0)queueMicrotask(fn);return 1;},clearTimeout(){},
